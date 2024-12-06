@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import ase.data
 import ase.io
 import h5py
+import MDAnalysis as mda
 import numpy as np
 
 from mace.tools import AtomicNumberTable
@@ -30,8 +31,8 @@ DEFAULT_CONFIG_TYPE_WEIGHTS = {DEFAULT_CONFIG_TYPE: 1.0}
 
 @dataclass
 class Configuration:
-    atomic_numbers: np.ndarray
     positions: Positions  # Angstrom
+    atomic_numbers: Optional[np.ndarray] = None
     energy: Optional[float] = None  # eV
     forces: Optional[Forces] = None  # eV/Angstrom
     stress: Optional[Stress] = None  # eV/Angstrom^3
@@ -48,6 +49,7 @@ class Configuration:
     virials_weight: float = 1.0  # weight of config virial in loss
     config_type: Optional[str] = DEFAULT_CONFIG_TYPE  # config_type of config
     head: Optional[str] = "Default"  # head used to compute the config
+    universe: Optional[mda.Universe] = None # MDAnalysis universe with topology info
 
 
 Configurations = List[Configuration]
@@ -301,6 +303,24 @@ def load_from_xyz(
     )
     return atomic_energies_dict, configs
 
+def load_from_mda_universe(universe, head_name):
+    all_configs = []
+    for structure in universe.trajectory:
+        
+        config =  Configuration(
+            positions=structure.positions,
+            forces=structure.forces,
+            head=head_name,
+            energy_weight=0.0,
+            forces_weight=1.0,
+            stress_weight=0.0,
+            virials_weight=0.0,
+            config_type="Default",
+            pbc=[structure.triclinic_dimensions is not None] * 3,
+            cell=structure.triclinic_dimensions,
+        )
+        all_configs.append(config)
+    return all_configs
 
 def compute_average_E0s(
     collections_train: Configurations, z_table: AtomicNumberTable

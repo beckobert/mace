@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import MDAnalysis as mda
 import numpy as np
 import torch
 import torch.distributed
@@ -123,6 +124,76 @@ def get_dataset_from_xyz(
         SubsetCollection(train=train_configs, valid=valid_configs, tests=test_configs),
         atomic_energies_dict,
     )
+
+def get_mda_universes(mda_universes_kwargs):
+    mda_universes = {}
+    for key in ['train', 'valid', 'test']:
+        if key in mda_universes_kwargs.keys():
+            mda_universes[key] = mda.Universe(**mda_universes_kwargs[key])
+        else:
+            mda_universes[key] = None
+    return mda_universes
+
+def get_dataset_from_mda(
+    work_dir: str,
+    train_universe: mda.Universe,
+    valid_universe: Optional[mda.Universe],
+    valid_fraction: float,
+    # config_type_weights: Dict,
+    test_universe: Optional[mda.Universe] = None,
+    seed: int = 1234,
+    # keep_isolated_atoms: bool = False,
+    head_name: str = "Default",
+) -> Tuple[SubsetCollection, Optional[Dict[int, float]]]:
+    """Load training and test dataset from xyz file"""
+    all_train_configs = data.load_from_mda_universe(
+        universe = train_universe,
+        # config_type_weights=config_type_weights,
+        # extract_atomic_energies=True,
+        # keep_isolated_atoms=keep_isolated_atoms,
+        head_name=head_name,
+    )
+    logging.info(
+        f"Training set [{len(all_train_configs)} configs, {np.sum([1 if config.energy else 0 for config in all_train_configs])} energy, {np.sum([config.forces.size for config in all_train_configs])} forces] loaded from '{train_universe}'"
+    )
+    if valid_universe is not None:
+        _, valid_configs = data.load_from_mda_universe(
+            universe=valid_universe,
+            # config_type_weights=config_type_weights,
+            # extract_atomic_energies=False,
+            head_name=head_name,
+        )
+        logging.info(
+            f"Validation set [{len(valid_configs)} configs, {np.sum([1 if config.energy else 0 for config in valid_configs])} energy, {np.sum([config.forces.size for config in valid_configs])} forces] loaded from '{valid_universe}'"
+        )
+        train_configs = all_train_configs
+    else:
+        train_configs, valid_configs = data.random_train_valid_split(
+            all_train_configs, valid_fraction, seed, work_dir
+        )
+        logging.info(
+            f"Validaton set contains {len(valid_configs)} configurations [{np.sum([1 if config.energy else 0 for config in valid_configs])} energy, {np.sum([config.forces.size for config in valid_configs])} forces]"
+        )
+
+    test_configs = []
+    if test_universe is not None:
+        _, all_test_configs = data.load_from_mda_universe(
+            universe=test_universe,
+            # config_type_weights=config_type_weights,
+            # extract_atomic_energies=False,
+            head_name=head_name,
+        )
+        # create list of tuples (config_type, list(Atoms))
+        test_configs = data.test_config_types(all_test_configs)
+        logging.info(
+            f"Test set ({len(all_test_configs)} configs) loaded from '{test_universe}':"
+        )
+        for name, tmp_configs in test_configs:
+            logging.info(
+                f"{name}: {len(tmp_configs)} configs, {np.sum([1 if config.energy else 0 for config in tmp_configs])} energy, {np.sum([config.forces.size for config in tmp_configs])} forces"
+            )
+
+    return SubsetCollection(train=train_configs, valid=valid_configs, tests=test_configs)
 
 
 def get_config_type_weights(ct_weights):

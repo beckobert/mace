@@ -22,6 +22,7 @@ class HeadConfig:
     valid_file: Optional[str] = None
     test_file: Optional[str] = None
     test_dir: Optional[str] = None
+    mda_universes: Optional[dict] = None
     E0s: Optional[Any] = None
     statistics_file: Optional[str] = None
     valid_fraction: Optional[float] = None
@@ -54,6 +55,7 @@ def dict_head_to_dataclass(
         valid_file=head.get("valid_file", args.valid_file),
         test_file=head.get("test_file", None),
         test_dir=head.get("test_dir", None),
+        mda_universes=head.get("mda_universes", None),
         E0s=head.get("E0s", args.E0s),
         statistics_file=head.get("statistics_file", args.statistics_file),
         valid_fraction=head.get("valid_fraction", args.valid_fraction),
@@ -82,6 +84,7 @@ def prepare_default_head(args: argparse.Namespace) -> Dict[str, Any]:
             "valid_file": args.valid_file,
             "test_file": args.test_file,
             "test_dir": args.test_dir,
+            "mda_universes": args.mda_universes,
             "E0s": args.E0s,
             "statistics_file": args.statistics_file,
             "valid_fraction": args.valid_fraction,

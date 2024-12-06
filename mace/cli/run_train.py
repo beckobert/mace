@@ -14,6 +14,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import List, Optional
 
+import numpy as np
 import torch.distributed
 import torch.nn.functional
 from e3nn.util import jit
@@ -42,9 +43,11 @@ from mace.tools.scripts_utils import (
     get_atomic_energies,
     get_avg_num_neighbors,
     get_config_type_weights,
+    get_dataset_from_mda,
     get_dataset_from_xyz,
     get_files_with_suffix,
     get_loss_fn,
+    get_mda_universes,
     get_optimizer,
     get_params_options,
     get_swa,
@@ -151,6 +154,8 @@ def run(args: argparse.Namespace) -> None:
     else:
         args.multiheads_finetuning = False
 
+    if args.mda_universes is not None:
+        args.mda_universes = get_mda_universes(ast.literal_eval(args.mda_universes))
     if args.heads is not None:
         args.heads = ast.literal_eval(args.heads)
     else:
@@ -220,6 +225,17 @@ def run(args: argparse.Namespace) -> None:
                 f"Total number of configurations: train={len(collections.train)}, valid={len(collections.valid)}, "
                 f"tests=[{', '.join([name + ': ' + str(len(test_configs)) for name, test_configs in collections.tests])}],"
             )
+        elif args.mda_universes is not None:
+            collections = get_dataset_from_mda(
+                work_dir=args.work_dir,
+                train_universe=head_config.mda_universes['train'],
+                valid_universe=head_config.mda_universes['valid'],
+                valid_fraction=head_config.valid_fraction,
+                test_universe=head_config.mda_universes['test'],
+                seed=args.seed,
+                head_name=head_config.head_name,
+            )
+            head_config.collections = collections
         head_configs.append(head_config)
 
     if all(check_path_ase_read(head_config.train_file) for head_config in head_configs):
@@ -311,58 +327,65 @@ def run(args: argparse.Namespace) -> None:
 
     # Atomic number table
     # yapf: disable
-    for head_config in head_configs:
-        if head_config.atomic_numbers is None:
-            assert check_path_ase_read(head_config.train_file), "Must specify atomic_numbers when using .h5 train_file input"
-            z_table_head = tools.get_atomic_number_table_from_zs(
-                z
-                for configs in (head_config.collections.train, head_config.collections.valid)
-                for config in configs
-                for z in config.atomic_numbers
-            )
-            head_config.atomic_numbers = z_table_head.zs
-            head_config.z_table = z_table_head
-        else:
-            if head_config.statistics_file is None:
-                logging.info("Using atomic numbers from command line argument")
+    if not args.coarse_grain:
+        for head_config in head_configs:
+            if head_config.atomic_numbers is None:
+                assert check_path_ase_read(head_config.train_file), "Must specify atomic_numbers when using .h5 train_file input"
+                z_table_head = tools.get_atomic_number_table_from_zs(
+                    z
+                    for configs in (head_config.collections.train, head_config.collections.valid)
+                    for config in configs
+                    for z in config.atomic_numbers
+                )
+                head_config.atomic_numbers = z_table_head.zs
+                head_config.z_table = z_table_head
             else:
-                logging.info("Using atomic numbers from statistics file")
-            zs_list = ast.literal_eval(head_config.atomic_numbers)
-            assert isinstance(zs_list, list)
-            z_table_head = tools.AtomicNumberTable(zs_list)
-            head_config.atomic_numbers = zs_list
-            head_config.z_table = z_table_head
-        # yapf: enable
-    all_atomic_numbers = set()
-    for head_config in head_configs:
-        all_atomic_numbers.update(head_config.atomic_numbers)
-    z_table = AtomicNumberTable(sorted(list(all_atomic_numbers)))
-    logging.info(f"Atomic Numbers used: {z_table.zs}")
+                if head_config.statistics_file is None:
+                    logging.info("Using atomic numbers from command line argument")
+                else:
+                    logging.info("Using atomic numbers from statistics file")
+                zs_list = ast.literal_eval(head_config.atomic_numbers)
+                assert isinstance(zs_list, list)
+                z_table_head = tools.AtomicNumberTable(zs_list)
+                head_config.atomic_numbers = zs_list
+                head_config.z_table = z_table_head
+            # yapf: enable
+        all_atomic_numbers = set()
+        for head_config in head_configs:
+            all_atomic_numbers.update(head_config.atomic_numbers)
+        z_table = AtomicNumberTable(sorted(list(all_atomic_numbers)))
+        logging.info(f"Atomic Numbers used: {z_table.zs}")
 
-    # Atomic energies
-    atomic_energies_dict = {}
-    for head_config in head_configs:
-        if head_config.atomic_energies_dict is None or len(head_config.atomic_energies_dict) == 0:
-            assert head_config.E0s is not None, "Atomic energies must be provided"
-            if check_path_ase_read(head_config.train_file) and head_config.E0s.lower() != "foundation":
-                atomic_energies_dict[head_config.head_name] = get_atomic_energies(
-                    head_config.E0s, head_config.collections.train, head_config.z_table
-                )
-            elif head_config.E0s.lower() == "foundation":
-                assert args.foundation_model is not None
-                z_table_foundation = AtomicNumberTable(
-                    [int(z) for z in model_foundation.atomic_numbers]
-                )
-                atomic_energies_dict[head_config.head_name] = {
-                    z: model_foundation.atomic_energies_fn.atomic_energies[
-                        z_table_foundation.z_to_index(z)
-                    ].item()
-                    for z in z_table.zs
-                }
+        # Atomic energies
+        atomic_energies_dict = {}
+        for head_config in head_configs:
+            if head_config.atomic_energies_dict is None or len(head_config.atomic_energies_dict) == 0:
+                assert head_config.E0s is not None, "Atomic energies must be provided"
+                if check_path_ase_read(head_config.train_file) and head_config.E0s.lower() != "foundation":
+                    atomic_energies_dict[head_config.head_name] = get_atomic_energies(
+                        head_config.E0s, head_config.collections.train, head_config.z_table
+                    )
+                elif head_config.E0s.lower() == "foundation":
+                    assert args.foundation_model is not None
+                    z_table_foundation = AtomicNumberTable(
+                        [int(z) for z in model_foundation.atomic_numbers]
+                    )
+                    atomic_energies_dict[head_config.head_name] = {
+                        z: model_foundation.atomic_energies_fn.atomic_energies[
+                            z_table_foundation.z_to_index(z)
+                        ].item()
+                        for z in z_table.zs
+                    }
+                else:
+                    atomic_energies_dict[head_config.head_name] = get_atomic_energies(head_config.E0s, None, head_config.z_table)
             else:
-                atomic_energies_dict[head_config.head_name] = get_atomic_energies(head_config.E0s, None, head_config.z_table)
-        else:
-            atomic_energies_dict[head_config.head_name] = head_config.atomic_energies_dict
+                atomic_energies_dict[head_config.head_name] = head_config.atomic_energies_dict
+    else:
+        logging.info(f"No Atomic Numbers/Energies due to coarse graining mode.")
+        residues = []
+        for head_config in head_configs:
+            residues.append(head_config.mda_universes["train"].residues.resnames)
+        z_table = AtomicNumberTable(range(np.unique(residues).shape[0])) # Create fake z table
 
     # Atomic energies for multiheads finetuning
     if args.multiheads_finetuning:
@@ -401,12 +424,18 @@ def run(args: argparse.Namespace) -> None:
         # atomic_energies: np.ndarray = np.array(
         #     [atomic_energies_dict[z] for z in z_table.zs]
         # )
-        atomic_energies = dict_to_array(atomic_energies_dict, heads)
-        for head_config in head_configs:
-            try:
-                logging.info(f"Atomic Energies used (z: eV) for head {head_config.head_name}: " + "{" + ", ".join([f"{z}: {atomic_energies_dict[head_config.head_name][z]}" for z in head_config.z_table.zs]) + "}")
-            except KeyError as e:
-                raise KeyError(f"Atomic number {e} not found in atomic_energies_dict for head {head_config.head_name}, add E0s for this atomic number") from e
+        if args.coarse_grain:
+            atomic_energies = None
+            args.compute_energy = False
+            args.loss_function = "forces_only"
+        else:
+            atomic_energies = dict_to_array(atomic_energies_dict, heads)
+            for head_config in head_configs:
+                try:
+                    logging.info(f"Atomic Energies used (z: eV) for head {head_config.head_name}: " + "{" + ", ".join([f"{z}: {atomic_energies_dict[head_config.head_name][z]}" for z in head_config.z_table.zs]) + "}")
+                except KeyError as e:
+                    raise KeyError(f"Atomic number {e} not found in atomic_energies_dict for head {head_config.head_name}, add E0s for this atomic number") from e
+            
 
 
     valid_sets = {head: [] for head in heads}
@@ -433,6 +462,21 @@ def run(args: argparse.Namespace) -> None:
             valid_sets[head_config.head_name] = data.HDF5Dataset(
                 head_config.valid_file, r_max=args.r_max, z_table=z_table, heads=heads, head=head_config.head_name
             )
+        elif head_config.mda_universes is not None:
+            train_sets[head_config.head_name] = [
+                data.AtomicData.from_mda_config(
+                    config, universe=head_config.mda_universes["train"],
+                    cutoff=args.r_max, heads=heads, head=head_config.head_name,
+                )
+                for config in head_config.collections.train
+            ]
+            valid_sets[head_config.head_name] = [
+                data.AtomicData.from_mda_config(
+                    config, universe=head_config.mda_universes["train"],
+                    cutoff=args.r_max, heads=heads, head=head_config.head_name,
+                )
+                for config in head_config.collections.valid
+            ]
         else:  # This case would be for when the file path is to a directory of multiple .h5 files
             train_sets[head_config.head_name] = data.dataset_from_sharded_hdf5(
                 head_config.train_file, r_max=args.r_max, z_table=z_table, heads=heads, head=head_config.head_name

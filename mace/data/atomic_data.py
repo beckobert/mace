@@ -6,6 +6,7 @@
 
 from typing import Optional, Sequence
 
+import numpy as np
 import torch.utils.data
 
 from mace.tools import (
@@ -224,6 +225,80 @@ class AtomicData(torch_geometric.data.Data):
             virials=virials,
             dipole=dipole,
             charges=charges,
+        )
+
+
+    @classmethod
+    def from_mda_config(
+        cls,
+        config: Configuration,
+        universe: AtomicNumberTable,
+        cutoff: float,
+        heads: Optional[list] = None,
+    ) -> "AtomicData":
+        if heads is None:
+            heads = ["default"]
+        edge_index, shifts, unit_shifts, cell = get_neighborhood(
+            positions=config.positions, cutoff=cutoff, pbc=config.pbc, cell=config.cell
+        )
+        residues = np.unique(universe.residues.resnames)
+        indices = torch.tensor(
+            np.seachsorted(residues, (universe.residues.resnames)),
+            dtype=torch.int64
+        )
+        one_hot = to_one_hot(
+            indices=indices.unsqueeze(-1), num_classes=residues.shape[0]
+        )
+        try:
+            head = torch.tensor(heads.index(config.head), dtype=torch.long)
+        except ValueError:
+            head = torch.tensor(len(heads) - 1, dtype=torch.long)
+
+        cell = (
+            torch.tensor(cell, dtype=torch.get_default_dtype())
+            if cell is not None
+            else torch.tensor(
+                3 * [0.0, 0.0, 0.0], dtype=torch.get_default_dtype()
+            ).view(3, 3)
+        )
+
+        weight = (
+            torch.tensor(config.weight, dtype=torch.get_default_dtype())
+            if config.weight is not None
+            else 1
+        )
+
+        forces_weight = (
+            torch.tensor(config.forces_weight, dtype=torch.get_default_dtype())
+            if config.forces_weight is not None
+            else 1
+        )
+
+        forces = (
+            torch.tensor(config.forces, dtype=torch.get_default_dtype())
+            if config.forces is not None
+            else None
+        )
+
+        return cls(
+            edge_index=torch.tensor(edge_index, dtype=torch.long),
+            positions=torch.tensor(config.positions, dtype=torch.get_default_dtype()),
+            shifts=torch.tensor(shifts, dtype=torch.get_default_dtype()),
+            unit_shifts=torch.tensor(unit_shifts, dtype=torch.get_default_dtype()),
+            cell=cell,
+            node_attrs=one_hot,
+            weight=weight,
+            head=head,
+            energy_weight=torch.tensor(1, dtype=torch.get_default_dtype()),
+            forces_weight=forces_weight,
+            stress_weight=torch.tensor(1, dtype=torch.get_default_dtype()),
+            virials_weight=torch.tensor(1, dtype=torch.get_default_dtype()),
+            forces=forces,
+            energy=None,
+            stress=None,
+            virials=None,
+            dipole=None,
+            charges=None,
         )
 
 

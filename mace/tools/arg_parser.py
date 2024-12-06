@@ -266,6 +266,13 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         required=False,
     )
     parser.add_argument(
+        "--mda_universes",
+        help="Dict of keywords to set up a MDAnalysis universe",
+        type=str,
+        default=None,
+        required=False,
+    )
+    parser.add_argument(
         "--test_file",
         help="Test set .xyz pt .h5 file",
         type=str,
