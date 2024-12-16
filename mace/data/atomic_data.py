@@ -243,7 +243,7 @@ class AtomicData(torch_geometric.data.Data):
         )
         residues = np.unique(universe.residues.resnames)
         indices = torch.tensor(
-            np.seachsorted(residues, (universe.residues.resnames)),
+            np.searchsorted(residues, (universe.residues.resnames)),
             dtype=torch.int64
         )
         one_hot = to_one_hot(

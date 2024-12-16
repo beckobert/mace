@@ -385,7 +385,14 @@ def run(args: argparse.Namespace) -> None:
         residues = []
         for head_config in head_configs:
             residues.append(head_config.mda_universes["train"].residues.resnames)
-        z_table = AtomicNumberTable(range(np.unique(residues).shape[0])) # Create fake z table
+        z_table = AtomicNumberTable(list(range(np.unique(residues).shape[0]))) # Create fake z table
+        E0s = ",".join([f"{z:d}: 0.0" for z in z_table.zs])
+        E0s = "{" + E0s + "}"
+        # ic(E0s)
+        atomic_energies_dict = {}
+        for head_config in head_configs:
+            atomic_energies_dict[head_config.head_name] = get_atomic_energies(E0s, None, z_table)
+        # ic(atomic_energies_dict)
 
     # Atomic energies for multiheads finetuning
     if args.multiheads_finetuning:
@@ -421,15 +428,15 @@ def run(args: argparse.Namespace) -> None:
         else:
             args.compute_energy = True
             args.compute_dipole = False
+        atomic_energies = dict_to_array(atomic_energies_dict, heads)
         # atomic_energies: np.ndarray = np.array(
         #     [atomic_energies_dict[z] for z in z_table.zs]
         # )
         if args.coarse_grain:
-            atomic_energies = None
             args.compute_energy = False
             args.loss_function = "forces_only"
+            args.scaling = "no_scaling"
         else:
-            atomic_energies = dict_to_array(atomic_energies_dict, heads)
             for head_config in head_configs:
                 try:
                     logging.info(f"Atomic Energies used (z: eV) for head {head_config.head_name}: " + "{" + ", ".join([f"{z}: {atomic_energies_dict[head_config.head_name][z]}" for z in head_config.z_table.zs]) + "}")
@@ -441,7 +448,23 @@ def run(args: argparse.Namespace) -> None:
     valid_sets = {head: [] for head in heads}
     train_sets = {head: [] for head in heads}
     for head_config in head_configs:
-        if check_path_ase_read(head_config.train_file):
+        if head_config.mda_universes is not None:
+            train_sets[head_config.head_name] = [
+                data.AtomicData.from_mda_config(
+                    config, universe=head_config.mda_universes["train"],
+                    cutoff=args.r_max, heads=heads,
+                )
+                for config in head_config.collections.train
+            ]
+            valid_sets[head_config.head_name] = [
+                data.AtomicData.from_mda_config(
+                    config, universe=head_config.mda_universes["train"],
+                    cutoff=args.r_max, heads=heads,
+                )
+                for config in head_config.collections.valid
+            ]
+            
+        elif check_path_ase_read(head_config.train_file):
             train_sets[head_config.head_name] = [
                 data.AtomicData.from_config(
                     config, z_table=z_table, cutoff=args.r_max, heads=heads
@@ -454,7 +477,7 @@ def run(args: argparse.Namespace) -> None:
                     )
                     for config in head_config.collections.valid
                 ]
-
+            
         elif head_config.train_file.endswith(".h5"):
             train_sets[head_config.head_name] = data.HDF5Dataset(
                 head_config.train_file, r_max=args.r_max, z_table=z_table, heads=heads, head=head_config.head_name
@@ -462,21 +485,6 @@ def run(args: argparse.Namespace) -> None:
             valid_sets[head_config.head_name] = data.HDF5Dataset(
                 head_config.valid_file, r_max=args.r_max, z_table=z_table, heads=heads, head=head_config.head_name
             )
-        elif head_config.mda_universes is not None:
-            train_sets[head_config.head_name] = [
-                data.AtomicData.from_mda_config(
-                    config, universe=head_config.mda_universes["train"],
-                    cutoff=args.r_max, heads=heads, head=head_config.head_name,
-                )
-                for config in head_config.collections.train
-            ]
-            valid_sets[head_config.head_name] = [
-                data.AtomicData.from_mda_config(
-                    config, universe=head_config.mda_universes["train"],
-                    cutoff=args.r_max, heads=heads, head=head_config.head_name,
-                )
-                for config in head_config.collections.valid
-            ]
         else:  # This case would be for when the file path is to a directory of multiple .h5 files
             train_sets[head_config.head_name] = data.dataset_from_sharded_hdf5(
                 head_config.train_file, r_max=args.r_max, z_table=z_table, heads=heads, head=head_config.head_name

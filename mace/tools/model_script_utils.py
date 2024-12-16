@@ -33,7 +33,7 @@ def configure_model(
     if args.scaling == "no_scaling":
         args.std = 1.0
         logging.info("No scaling selected")
-    elif (args.mean is None or args.std is None) and args.model != "AtomicDipolesMACE":
+    elif (args.mean is None or args.std is None) and args.compute_energy:
         args.mean, args.std = modules.scaling_classes[args.scaling](
             train_loader, atomic_energies
         )

@@ -129,7 +129,19 @@ def get_mda_universes(mda_universes_kwargs):
     mda_universes = {}
     for key in ['train', 'valid', 'test']:
         if key in mda_universes_kwargs.keys():
-            mda_universes[key] = mda.Universe(**mda_universes_kwargs[key])
+            # Deal with MDAnalysis beeing a piece of shit
+            coordinates = mda_universes_kwargs[key].pop('coordinates')
+            if not isinstance(coordinates, List):
+                coordinates = [coordinates]
+            if 'topology' in mda_universes_kwargs[key]:
+                topology = mda_universes_kwargs[key].pop("topology")
+            else:
+                topology = None
+            mda_universes[key] = mda.Universe(
+                topology,
+                *coordinates,
+                **mda_universes_kwargs[key]
+            )
         else:
             mda_universes[key] = None
     return mda_universes
@@ -977,6 +989,8 @@ def check_folder_subfolder(folder_path):
 
 
 def check_path_ase_read(filename: str) -> str:
+    if filename is None:
+        return False
     filepath = Path(filename)
     if filepath.is_dir():
         if len(list(filepath.glob("*.h5")) + list(filepath.glob("*.hdf5"))) == 0:

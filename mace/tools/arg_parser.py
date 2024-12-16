@@ -88,6 +88,7 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "PerAtomRMSEstressvirials",
             "PerAtomMAEstressvirials",
             "PerAtomMAE",
+            "ForceRMSE",
             "TotalMAE",
             "DipoleRMSE",
             "DipoleMAE",
@@ -394,6 +395,14 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         "--keep_isolated_atoms",
         help="Keep isolated atoms in the dataset, useful for transfer learning",
         type=str2bool,
+        default=False,
+    )
+
+    # Coarse graining
+    parser.add_argument(
+        "--coarse_grain",
+        help="Train model on coarse grained data",
+        action="store_true",
         default=False,
     )
 
