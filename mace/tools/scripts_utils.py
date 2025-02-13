@@ -169,7 +169,7 @@ def get_dataset_from_mda(
         f"Training set [{len(all_train_configs)} configs, {np.sum([1 if config.energy else 0 for config in all_train_configs])} energy, {np.sum([config.forces.size for config in all_train_configs])} forces] loaded from '{train_universe}'"
     )
     if valid_universe is not None:
-        _, valid_configs = data.load_from_mda_universe(
+        valid_configs = data.load_from_mda_universe(
             universe=valid_universe,
             # config_type_weights=config_type_weights,
             # extract_atomic_energies=False,
@@ -189,7 +189,7 @@ def get_dataset_from_mda(
 
     test_configs = []
     if test_universe is not None:
-        _, all_test_configs = data.load_from_mda_universe(
+        all_test_configs = data.load_from_mda_universe(
             universe=test_universe,
             # config_type_weights=config_type_weights,
             # extract_atomic_energies=False,

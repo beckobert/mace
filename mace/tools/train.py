@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch
 import torch.distributed
+from icecream import ic
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim.swa_utils import SWALR, AveragedModel
 from torch.utils.data import DataLoader
@@ -413,6 +414,7 @@ def evaluate(
     for batch in data_loader:
         batch = batch.to(device)
         batch_dict = batch.to_dict()
+        # ic(batch_dict['positions'])
         output = model(
             batch_dict,
             training=False,
@@ -420,8 +422,12 @@ def evaluate(
             compute_virials=output_args["virials"],
             compute_stress=output_args["stress"],
         )
+        
         avg_loss, aux = metrics(batch, output)
-
+    ic(batch_dict['forces'])
+    ic(output['forces'])
+    ic(torch.mean(torch.abs(batch_dict['forces'])))
+    ic(torch.mean(torch.abs(output['forces'])))
     avg_loss, aux = metrics.compute()
     aux["time"] = time.time() - start_time
     metrics.reset()

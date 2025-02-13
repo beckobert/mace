@@ -303,13 +303,17 @@ def load_from_xyz(
     )
     return atomic_energies_dict, configs
 
-def load_from_mda_universe(universe, head_name):
+def load_from_mda_universe(universe, head_name="default"):
+    force_unit = 0.01036427 # converting kJ/mol/Ang to eV/Ang
+    
     all_configs = []
     for structure in universe.trajectory:
+
+        cell = None if structure.triclinic_dimensions is None else structure.triclinic_dimensions
         
         config =  Configuration(
-            positions=structure.positions,
-            forces=structure.forces,
+            positions=universe.atoms.positions,
+            forces=universe.atoms.forces * force_unit,
             head=head_name,
             energy_weight=0.0,
             forces_weight=1.0,
@@ -317,7 +321,7 @@ def load_from_mda_universe(universe, head_name):
             virials_weight=0.0,
             config_type="Default",
             pbc=[structure.triclinic_dimensions is not None] * 3,
-            cell=structure.triclinic_dimensions,
+            cell=cell,
         )
         all_configs.append(config)
     return all_configs
