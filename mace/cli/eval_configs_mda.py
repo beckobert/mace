@@ -6,12 +6,10 @@
 
 import argparse
 
-import ase.data
 import ase.io
 import MDAnalysis as mda
 import numpy as np
 import torch
-from icecream import ic
 
 from mace import data
 from mace.tools import torch_geometric, torch_tools, utils
@@ -69,9 +67,6 @@ def run(args: argparse.Namespace) -> None:
     # Load data and prepare input
     u = mda.Universe(args.topology, *[args.coordinates])
     configs = data.load_from_mda_universe(universe=u)
-
-    ic(model.atomic_numbers)
-    z_table = utils.AtomicNumberTable([int(z) for z in model.atomic_numbers])
 
     data_loader = torch_geometric.dataloader.DataLoader(
         dataset=[
