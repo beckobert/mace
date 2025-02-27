@@ -36,9 +36,6 @@ def get_neighborhood(
     if not pbc_z:
         cell[2, :] = (max_positions + 5 * cutoff) * identity[2, :]
 
-    # ic(pbc)
-    # ic(cell)
-    # ic(positions)
     sender, receiver, unit_shifts = neighbour_list(
         quantities="ijS",
         pbc=pbc,
