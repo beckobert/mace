@@ -100,6 +100,12 @@ def get_symmetric_displacement(
     )
     cell = cell.view(-1, 3, 3)
     cell = cell + torch.matmul(cell, symmetric_displacement)
+    if unit_shifts.shape[0] == 0:
+        unit_shifts = torch.zeros(
+            (sender.shape[0], 3),
+            dtype=positions.dtype,
+            device=positions.device
+        )
     shifts = torch.einsum(
         "be,bec->bc",
         unit_shifts,

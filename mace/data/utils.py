@@ -310,13 +310,19 @@ def load_from_mda_universe(universe, head_name="default"):
     for structure in universe.trajectory:
 
         cell = None if structure.triclinic_dimensions is None else structure.triclinic_dimensions
+        try:
+            forces = universe.atoms.forces * force_unit
+            forces_weight = 1.0
+        except:
+            forces = np.zeros(universe.atoms.positions.shape)
+            forces_weight = 0.0
         
         config =  Configuration(
             positions=universe.atoms.positions,
-            forces=universe.atoms.forces * force_unit,
+            forces=forces,
             head=head_name,
             energy_weight=0.0,
-            forces_weight=1.0,
+            forces_weight=forces_weight,
             stress_weight=0.0,
             virials_weight=0.0,
             config_type="Default",
