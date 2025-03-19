@@ -388,6 +388,7 @@ class ScaleShiftMACE(MACE):
         compute_displacement: bool = False,
         compute_hessian: bool = False,
         committee_heads: Optional[torch.Tensor] = None,
+        uncertainty_only_heads: Optional[torch.Tensor] = None,
     ) -> Dict[str, Optional[torch.Tensor]]:
         # Setup
         data["positions"].requires_grad_(True)
@@ -512,27 +513,33 @@ class ScaleShiftMACE(MACE):
             output["stds"] = None
             output["heads"] = None
         else:
+            if uncertainty_only_heads is None:
+                uncert_heads = committee_heads
+            else:
+                uncert_heads = uncertainty_only_heads
+            # TODO: Maybe rename stds into uncert
             stds = {}
             heads = {}
             heads["energy"] = total_energy_heads[:, committee_heads]
             output["energy"] = torch.mean(heads["energy"], dim=-1)
-            stds["energy"] = torch.std(heads["energy"], dim=-1)
+            stds["energy"] = torch.std(total_energy_heads[:, uncert_heads], dim=-1)
             heads["node_energy"] = node_energy_heads[:, committee_heads]
             output["node_energy"] = torch.mean(heads["node_energy"], dim=-1)
-            stds["node_energy"] = torch.std(heads["node_energy"], dim=-1)
+            stds["node_energy"] = torch.std(node_energy_heads[:, uncert_heads], dim=-1)
             heads["interaction_energy"] = inter_e_heads[:, committee_heads]
             output["interaction_energy"] = torch.mean(heads["interaction_energy"], dim=-1)
-            stds["interaction_energy"] = torch.std(heads["interaction_energy"], dim=-1)
+            stds["interaction_energy"] = torch.std(inter_e_heads[:, uncert_heads], dim=-1)
             heads["contributions"] = node_es_heads[:, :, committee_heads]
             output["contributions"] = torch.mean(heads["contributions"], dim=-1)
-            stds["contributions"] = torch.std(heads["contributions"], dim=-1)
+            stds["contributions"] = torch.std(node_es_heads[:, :, uncert_heads], dim=-1)
 
             means_properties, stds_properties, heads_properties = get_outputs_committee(
                 energy_heads=inter_e_heads,
                 positions=data["positions"],
                 displacement=displacement,
                 cell=data["cell"],
-                committee_heads=committee_heads,
+                prediction_heads=committee_heads,
+                uncert_heads=uncert_heads,
                 compute_force=compute_force,
                 compute_virials=compute_virials,
                 compute_stress=compute_stress,

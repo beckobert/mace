@@ -217,7 +217,8 @@ def get_outputs_committee(
     positions: torch.Tensor,
     displacement: Optional[torch.Tensor],
     cell: torch.Tensor,
-    committee_heads: torch.Tensor,
+    prediction_heads: torch.Tensor,
+    uncert_heads: torch.Tensor,
     compute_force: bool = True,
     compute_virials: bool = True,
     compute_stress: bool = True,
@@ -228,10 +229,14 @@ def get_outputs_committee(
 ]:
     means = {}
     stds = {}
-    
+
     properties = ['forces', 'virials', 'stress', 'hessian']
     head_collector = {key: [] for key in properties}
-    for head in committee_heads:
+    all_heads = torch.unique(torch.concatenate([prediction_heads, uncert_heads]))
+    prediction_idx = torch.searchsorted(all_heads, prediction_heads).tolist()
+    uncert_idx = torch.searchsorted(all_heads, uncert_heads).tolist()
+    
+    for head in all_heads:
         output_head = get_outputs(
             energy=energy_heads[:, head],
             positions=positions,
@@ -249,10 +254,11 @@ def get_outputs_committee(
 
     for k, v in head_collector.items():
         if v[0] is not None:
-            prop_stack = torch.stack(v, dim=-1)
-            head_collector[k] = prop_stack
-            means[k] = torch.mean(prop_stack, dim=-1)
-            stds[k] = torch.std(prop_stack, dim=-1)
+            pred_stack = torch.stack(v, dim=0)[prediction_idx]
+            uncert_stack = torch.stack(v, dim=0)[uncert_idx]
+            head_collector[k] = pred_stack
+            means[k] = torch.mean(pred_stack, dim=0)
+            stds[k] = torch.std(uncert_stack, dim=0)
         else:
             means[k] = None
             stds[k] = None
