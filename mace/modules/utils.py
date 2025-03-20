@@ -229,8 +229,8 @@ def get_outputs_committee(
 ]:
     means = {}
     stds = {}
-
-    properties = ['forces', 'virials', 'stress', 'hessian']
+    
+    properties = ["forces", "virials", "stress", "hessian"]
     head_collector = {key: [] for key in properties}
     all_heads = torch.unique(torch.concatenate([prediction_heads, uncert_heads]))
     prediction_idx = torch.searchsorted(all_heads, prediction_heads).tolist()
