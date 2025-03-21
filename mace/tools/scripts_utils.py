@@ -311,6 +311,69 @@ def remove_pt_head(
     return new_model
 
 
+def reattach_foundation_head(
+    model: torch.nn.Module, model_foundation: torch.nn.Module
+) -> torch.nn.Module:
+    """Reattach a head from a foundation model onto a trained model.
+    
+    If you use this, make sure that only the output blocks were trained (--optimize_readouts_only),
+    that the same foundation model was used as the basis of the training and that the the elements
+    were buffered to include all elements from the foundation model
+    (--foundation_model_elements=True).
+
+    Args:
+        model (ScaleShiftMACE): trained model who gets the additional head
+        foundation_model (torch.nn.Module): Foundation model with single head
+
+    Returns:
+        ScaleShiftMACE: A new MACE model with only the specified head
+    """
+
+    model_config = extract_config_mace_model(model)
+
+    assert (
+        model.atomic_numbers.shape[0] == model_foundation.atomic_numbers.shape[0]
+    ), "Models don't have same numbers of elements. Use `--foundation_model_elements=True`"
+
+    model_config["heads"].append("pt_head")
+    model_config["atomic_energies"] = np.concatenate([
+        model.atomic_energies_fn.atomic_energies.detach().cpu().numpy(),
+        model_foundation.atomic_energies_fn.atomic_energies.unsqueeze(0).detach().cpu().numpy(),
+        ])
+    model_config["atomic_inter_scale"] = np.concatenate([
+        model.scale_shift.scale.detach().cpu().numpy(),
+        model_foundation.scale_shift.scale.unsqueeze(0).detach().cpu().numpy()
+    ])
+    model_config["atomic_inter_shift"] = np.concatenate([
+        model.scale_shift.shift.detach().cpu().numpy(),
+        model_foundation.scale_shift.shift.unsqueeze(0).detach().cpu().numpy()
+    ])
+
+    new_model = model.__class__(**model_config)
+    state_dict = model.state_dict()
+    state_dict_foundation = model_foundation.state_dict()
+
+    new_state_dict = {}
+    for name, param in state_dict.items():
+        param_foundation = state_dict_foundation[name]
+        if "atomic_energies" in name or "scale" in name or "shift" in name:
+            new_state_dict[name] = torch.concatenate([
+                param.detach().cpu(),
+                param_foundation.unsqueeze(0).detach().cpu()
+            ])
+        elif "readouts" in name:
+            new_state_dict[name] = torch.concatenate([
+                param.detach().cpu(),
+                param_foundation.detach().cpu()
+            ])
+        else:
+            new_state_dict[name] = param
+
+    new_model.load_state_dict(new_state_dict)
+
+    return new_model
+    
+    
 def extract_model(model: torch.nn.Module, map_location: str = "cpu") -> torch.nn.Module:
     model_copy = model.__class__(**extract_config_mace_model(model))
     model_copy.load_state_dict(model.state_dict())
