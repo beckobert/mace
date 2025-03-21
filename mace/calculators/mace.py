@@ -5,6 +5,7 @@
 ###########################################################################################
 
 
+import fnmatch
 import logging
 from glob import glob
 from pathlib import Path
@@ -46,7 +47,11 @@ class MACECalculator(Calculator):
         charges_key: str, Array field of atoms object where atomic charges are stored
         model_type: str, type of model to load
                     Options: [MACE, DipoleMACE, EnergyDipoleMACE]
-        multihead_committee: bool, use multihead committee for prediction
+        multihead_prediction_heads: str, list[str], names of heads that form the multihead
+                    committee used for prediction of the PES. Supports wildcard characters.
+        multihead_uncertainty_heads: str, list[str], names of heads that form a multihead
+                    committee, that is only used to predict the uncertainty. If `None`,
+                    same heads as for prediction will be used.
 
     Dipoles are returned in units of Debye
     """
@@ -61,7 +66,8 @@ class MACECalculator(Calculator):
         default_dtype="",
         charges_key="Qs",
         model_type="MACE",
-        multihead_committee=False,
+        multihead_prediction_heads=None,
+        multihead_uncertainty_heads=None,
         compile_mode=None,
         fullgraph=True,
         enable_cueq=False,
@@ -91,7 +97,7 @@ class MACECalculator(Calculator):
         self.results = {}
 
         self.model_type = model_type
-        self.multihead_committee = multihead_committee
+        self.multihead_committee = (multihead_prediction_heads is not None)
 
         if model_type == "MACE":
             self.implemented_properties = [
@@ -204,10 +210,14 @@ class MACECalculator(Calculator):
         except AttributeError:
             self.heads = ["Default"]
         if self.multihead_committee:
-            self.committee_heads = [i for i, head in enumerate(self.heads) if "committee-" in head]
-            self.committee_heads = torch.tensor(self.committee_heads, dtype=int).to(device)
+            self.prediction_heads = self._id_heads(multihead_prediction_heads)
+            if multihead_uncertainty_heads is None:
+                self.uncertainty_heads = self.prediction_heads
+            else:
+                self.uncertainty_heads = self._id_heads(multihead_uncertainty_heads)
         else:
-            self.committee_heads = None
+            self.prediction_heads = None
+            self.uncertainty_heads = None
         model_dtype = get_model_dtype(self.models[0])
         if default_dtype == "":
             print(
@@ -226,6 +236,22 @@ class MACECalculator(Calculator):
         for model in self.models:
             for param in model.parameters():
                 param.requires_grad = False
+
+    def _glob_heads(self, head_key: str) -> list[str]:
+        if head_key in self.heads:
+            return [head_key]
+
+        keys = fnmatch.filter(self.heads, head_key)
+        if len(keys) == 0:
+            raise KeyError(head_key)
+        return keys
+
+    def _id_heads(self, head_names) -> list[str]:
+        if isinstance(head_names, str):
+            head_keys = self._glob_heads(head_names)
+        else:
+            head_keys = [*sum((self._glob_heads(key) for key in head_names), [])]
+        return np.searchsorted(self.heads, head_keys)
 
     def _create_result_tensors(
         self, model_type: str, num_models: int, num_atoms: int
@@ -321,7 +347,8 @@ class MACECalculator(Calculator):
                 batch.to_dict(),
                 compute_stress=compute_stress,
                 training=self.use_compile,
-                committee_heads=self.committee_heads,
+                committee_heads=self.prediction_heads,
+                uncertainty_only_heads=self.uncertainty_heads,
             )
             if self.model_type in ["MACE", "EnergyDipoleMACE"]:
                 ret_tensors["energies"][i] = out["energy"].detach()
@@ -412,7 +439,8 @@ class MACECalculator(Calculator):
                 compute_hessian=True,
                 compute_stress=False,
                 training=self.use_compile,
-                committee_heads=self.committee_heads,
+                committee_heads=self.prediction_heads,
+                uncertainty_only_heads=self.uncertainty_heads,
             )["hessian"]
             for model in self.models
         ]

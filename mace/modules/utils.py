@@ -232,9 +232,9 @@ def get_outputs_committee(
     
     properties = ["forces", "virials", "stress", "hessian"]
     head_collector = {key: [] for key in properties}
-    all_heads = torch.unique(torch.concatenate([prediction_heads, uncert_heads]))
-    prediction_idx = torch.searchsorted(all_heads, prediction_heads).tolist()
-    uncert_idx = torch.searchsorted(all_heads, uncert_heads).tolist()
+    all_heads = np.unique(np.concatenate([prediction_heads, uncert_heads]))
+    prediction_idx = np.searchsorted(all_heads, prediction_heads)
+    uncert_idx = np.searchsorted(all_heads, uncert_heads)
     
     for head in all_heads:
         output_head = get_outputs(
