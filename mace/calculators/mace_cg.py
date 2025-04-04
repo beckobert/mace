@@ -298,6 +298,7 @@ class MACECalculator_CG(Calculator):
         batch["positions"] = batch_atoms["positions"]
         batch["shifts"] = batch_atoms["shift"]
         batch["unit_shifts"] = batch_atoms["unit_shifts"]
+        batch["edge_index"] = batch_atoms["edge_index"]
         return batch
 
     def _clone_batch(self, batch):
