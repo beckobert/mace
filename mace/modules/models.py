@@ -390,8 +390,9 @@ class ScaleShiftMACE(MACE):
         committee_heads: Optional[torch.Tensor] = None,
     ) -> Dict[str, Optional[torch.Tensor]]:
         # Setup
-        data["positions"].requires_grad_(True)
-        data["node_attrs"].requires_grad_(True)
+        if not data["positions"].requires_grad:
+            data["positions"].requires_grad_(True)
+            data["node_attrs"].requires_grad_(True)
         num_atoms_arange = torch.arange(data["positions"].shape[0], device=data['batch'].device)
         num_graphs = data["ptr"].numel() - 1
         num_graphs_arange = torch.arange(num_graphs, device=data['batch'].device)
@@ -529,10 +530,10 @@ class ScaleShiftMACE(MACE):
 
             means_properties, stds_properties, heads_properties = get_outputs_committee(
                 energy_heads=inter_e_heads,
-                positions=data["positions"],
+                batch=data,
                 displacement=displacement,
-                cell=data["cell"],
                 committee_heads=committee_heads,
+                model=self,
                 compute_force=compute_force,
                 compute_virials=compute_virials,
                 compute_stress=compute_stress,

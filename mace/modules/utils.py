@@ -4,14 +4,16 @@
 # This program is distributed under the MIT License (see MIT.md)
 ###########################################################################################
 
+# import copy
 import logging
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
 import torch.nn
 import torch.utils.data
 from scipy.constants import c, e
+# from icecream import ic  # improved prints during prototying
 
 from mace.tools import to_numpy
 from mace.tools.scatter import scatter_mean, scatter_std, scatter_sum
@@ -37,6 +39,25 @@ def compute_forces(
     if gradient is None:
         return torch.zeros_like(positions)
     return -1 * gradient
+
+def compute_forces_jacrev(
+    batch: Dict[str, torch.Tensor],
+    positions: torch.Tensor,
+    model: torch.nn.Module,
+    committee_heads: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+
+    def energy_fn(positions):
+        # data = copy.deepcopy(batch) # Does not work, because deepcopy sets `requires_grad`, which is not allowed in a function that is differentiated
+        data = batch
+        data["positions"] = positions
+        out = model(data, compute_force=False, committee_heads=committee_heads)
+        return out["heads"]["interaction_energy"]
+        
+    jacrev = torch.func.jacrev(energy_fn)
+    forces = -1 * jacrev(positions)
+    # ic(forces)
+    return forces[0, committee_heads]
 
 
 def compute_forces_virials(
@@ -214,10 +235,10 @@ def get_outputs(
 
 def get_outputs_committee(
     energy_heads: torch.Tensor,
-    positions: torch.Tensor,
+    batch: Dict,
     displacement: Optional[torch.Tensor],
-    cell: torch.Tensor,
     committee_heads: torch.Tensor,
+    model: Optional[torch.nn.Module],
     compute_force: bool = True,
     compute_virials: bool = True,
     compute_stress: bool = True,
@@ -225,38 +246,61 @@ def get_outputs_committee(
 ) -> Tuple[
     dict,
     dict,
+    dict,
 ]:
+    positions = batch["positions"]
+    cell = batch["cell"]
+    # ic(positions)
+
+    head_collector = {}
     means = {}
     stds = {}
     
-    properties = ["forces", "virials", "stress", "hessian"]
-    head_collector = {key: [] for key in properties}
-    for head in committee_heads:
-        output_head = get_outputs(
-            energy=energy_heads[:, head],
+    if compute_force and not compute_virials and not compute_stress and not compute_hessian:
+        # ic('compute_jacrev')
+        forces = compute_forces_jacrev(
+            batch=batch,
             positions=positions,
-            displacement=displacement,
-            cell=cell,
-            training=False,
-            committee=True,
-            compute_force=compute_force,
-            compute_virials=compute_virials,
-            compute_stress=compute_stress,
-            compute_hessian=compute_hessian,    
-        )
-        for k, key in enumerate(properties):
-            head_collector[key].append(output_head[k])
+            model=model,
+            committee_heads=committee_heads)
+        head_collector["forces"] = forces.permute(1, 2, 0)
+        means["forces"] = torch.mean(forces, axis=0)
+        stds["forces"] = torch.std(forces, axis=0)
+        for prop in ["virials", "stress", "hessian"]:
+            head_collector[prop] = None
+            means[prop] = None
+            stds[prop] = None
+    else:
+        # ic('not jacrev')
+        # ic(compute_force)
+        properties = ["forces", "virials", "stress", "hessian"]
+        head_collector = {key: [] for key in properties}    
+        for head in committee_heads:
+            output_head = get_outputs(
+                energy=energy_heads[:, head],
+                positions=positions,
+                displacement=displacement,
+                cell=cell,
+                training=False,
+                committee=True,
+                compute_force=compute_force,
+                compute_virials=compute_virials,
+                compute_stress=compute_stress,
+                compute_hessian=compute_hessian,    
+            )
+            for k, key in enumerate(properties):
+                head_collector[key].append(output_head[k])
 
-    for k, v in head_collector.items():
-        if v[0] is not None:
-            prop_stack = torch.stack(v, dim=-1)
-            head_collector[k] = prop_stack
-            means[k] = torch.mean(prop_stack, dim=-1)
-            stds[k] = torch.std(prop_stack, dim=-1)
-        else:
-            means[k] = None
-            stds[k] = None
-            head_collector[k] = None
+        for k, v in head_collector.items():
+            if v[0] is not None:
+                prop_stack = torch.stack(v, dim=-1)
+                head_collector[k] = prop_stack
+                means[k] = torch.mean(prop_stack, dim=-1)
+                stds[k] = torch.std(prop_stack, dim=-1)
+            else:
+                means[k] = None
+                stds[k] = None
+                head_collector[k] = None
 
     return means, stds, head_collector
 
