@@ -6,7 +6,6 @@
 
 import argparse
 
-import ase.data
 import ase.io
 import numpy as np
 import torch
@@ -68,6 +67,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         default=False,
     )
+    parser.add_argument(
+        "--return_node_energies",
+        help="Return the energies of each node/atom.",
+        action="store_true",
+        default=False,
+    )
     return parser.parse_args()
 
 
@@ -126,8 +131,10 @@ def run(args: argparse.Namespace) -> None:
     contributions_list = []
     stresses_list = []
     forces_list = []
+    node_energies_list = []
     energy_stds = []
     forces_stds = []
+    node_energy_stds = []
 
     for batch in data_loader:
         batch = batch.to(device)
@@ -155,6 +162,14 @@ def run(args: argparse.Namespace) -> None:
         )
         forces_list += forces[:-1]  # drop last as its empty
 
+        if args.return_node_energies:
+            node_energies = np.split(
+                torch_tools.to_numpy(output["node_energy"]),
+                indices_or_sections=batch.ptr[1:],
+                axis=0,
+            )
+            node_energies_list += node_energies[:-1]
+
         if args.predict_committee:
             energy_stds.append(torch_tools.to_numpy(output["stds"]["energy"]))
             forces_std = np.split(
@@ -162,7 +177,14 @@ def run(args: argparse.Namespace) -> None:
                 indices_or_sections=batch.ptr[1:],
                 axis=0,
             )
-            forces_stds.append(forces_std[:-1])
+            forces_stds += forces_std[:-1]
+            if args.return_node_energies:
+                node_energy_std = np.split(
+                    torch_tools.to_numpy(output["stds"]["node_energy"]),
+                    indices_or_sections=batch.ptr[1:],
+                    axis=0
+                )
+                node_energy_stds += node_energy_std[:-1]
 
     energies = np.concatenate(energies_list, axis=0)
     assert len(atoms_list) == len(energies) == len(forces_list)
@@ -173,11 +195,11 @@ def run(args: argparse.Namespace) -> None:
     if args.return_contributions:
         assert len(atoms_list) == len(contributions_list)
 
+    if args.return_node_energies:
+        assert len(atoms_list) == len(node_energies_list)
+
     if args.predict_committee:
         energy_stds = np.concatenate(energy_stds, axis=0)
-        forces_stds = [
-            stds for std_batch in forces_stds for stds in std_batch
-        ]
 
     # Store data in atoms objects
     for i, (atoms, energy, forces) in enumerate(zip(atoms_list, energies, forces_list)):
@@ -191,9 +213,14 @@ def run(args: argparse.Namespace) -> None:
         if args.return_contributions:
             atoms.arrays[args.info_prefix + "BO_contributions"] = contributions_list[i]
 
+        if args.return_node_energies:
+            atoms.arrays[args.info_prefix + "node_energy"] = node_energies_list[i][:, np.newaxis]
+
         if args.predict_committee:
             atoms.info[args.info_prefix + "energy_std"] = energy_stds[i]
             atoms.arrays[args.info_prefix + "forces_std"] = forces_stds[i]
+            if args.return_node_energies:
+                atoms.arrays[args.info_prefix + "node_energy_std"] = node_energy_stds[i][:, np.newaxis]
 
     # Write atoms to output path
     ase.io.write(args.output, images=atoms_list, format="extxyz")
