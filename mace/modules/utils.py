@@ -46,16 +46,9 @@ def compute_forces_jacrev(
     model: torch.nn.Module,
     committee_heads: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-
-    def energy_fn(positions):
-        # data = copy.deepcopy(batch) # Does not work, because deepcopy sets `requires_grad`, which is not allowed in a function that is differentiated
-        data = batch
-        data["positions"] = positions
-        out = model(data, compute_force=False, committee_heads=committee_heads)
-        return out["heads"]["interaction_energy"]
-        
-    jacrev = torch.func.jacrev(energy_fn)
-    forces = -1 * jacrev(positions)
+    if model.jacrev is None:
+        model.set_jacrev_forces()
+    forces = -1 * model.jacrev(positions, batch)
     # ic(forces)
     return forces[0, committee_heads]
 
@@ -250,7 +243,6 @@ def get_outputs_committee(
 ]:
     positions = batch["positions"]
     cell = batch["cell"]
-    # ic(positions)
 
     head_collector = {}
     means = {}

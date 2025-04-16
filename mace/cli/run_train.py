@@ -805,6 +805,8 @@ def run(args: argparse.Namespace) -> None:
             also_predict_committee=(args.n_committee is not None),
         )
 
+        model.jacrev = None # jacrev function can not be pickled
+
         if rank == 0:
             # Save entire model
             if swa_eval:

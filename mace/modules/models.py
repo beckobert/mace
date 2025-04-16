@@ -377,6 +377,21 @@ class ScaleShiftMACE(MACE):
         self.scale_shift = ScaleShiftBlock(
             scale=atomic_inter_scale, shift=atomic_inter_shift
         )
+        self.jacrev = None
+
+    def jacrev_forces(self):
+        def energy_fn(positions, data):
+            data["positions"] = positions
+            out = self(
+                data,
+                compute_force=False,
+                committee_heads=torch.arange(len(self.heads), device=data["batch"].device)
+            )
+            return out["heads"]["interaction_energy"]
+        return torch.func.jacrev(energy_fn, argnums=0)
+
+    def set_jacrev_forces(self):
+        self.jacrev = self.jacrev_forces()
 
     def forward(
         self,
