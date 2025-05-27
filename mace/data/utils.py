@@ -319,7 +319,11 @@ def load_from_mda_universe(universe, head_name="default"):
         
         config =  Configuration(
             positions=universe.atoms.positions,
+            energy=0.0,
             forces=forces,
+            stress=np.zeros(6),
+            virials=np.zeros((3, 3)),
+            dipole=np.zeros(3),
             head=head_name,
             energy_weight=0.0,
             forces_weight=forces_weight,
@@ -328,6 +332,7 @@ def load_from_mda_universe(universe, head_name="default"):
             config_type="Default",
             pbc=[structure.triclinic_dimensions is not None] * 3,
             cell=cell,
+            universe=universe,
         )
         all_configs.append(config)
     return all_configs

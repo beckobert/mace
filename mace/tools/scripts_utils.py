@@ -127,82 +127,113 @@ def get_dataset_from_xyz(
 
 def get_mda_universes(mda_universes_kwargs):
     mda_universes = {}
+    hdf5_files = {}
     for key in ['train', 'valid', 'test']:
         if key in mda_universes_kwargs.keys():
-            # Deal with MDAnalysis beeing a piece of shit
-            coordinates = mda_universes_kwargs[key].pop('coordinates')
-            if not isinstance(coordinates, List):
-                coordinates = [coordinates]
-            if 'topology' in mda_universes_kwargs[key]:
-                topology = mda_universes_kwargs[key].pop("topology")
-            else:
-                topology = None
-            mda_universes[key] = mda.Universe(
-                topology,
-                *coordinates,
-                **mda_universes_kwargs[key]
-            )
+            mda_universes[key] = []
+            hdf5_files[key] = []
+            if isinstance(mda_universes_kwargs[key], List):
+                for mda_universe_kwargs in mda_universes_kwargs[key]:
+                    mda_universes[key].append(_extract_universe(mda_universe_kwargs))
+                    hdf5_files[key].append(mda_universe_kwargs.pop('hdf5_file', None))
+            elif isinstance(mda_universes_kwargs[key], Dict):
+                mda_universes[key].append(_extract_universe(mda_universes_kwargs[key]))
+                hdf5_files[key].append(mda_universes_kwargs[key].pop('hdf5_file', None))
+            if all(x is None for x in hdf5_files[key]):
+                hdf5_files[key] = None
         else:
             mda_universes[key] = None
-    return mda_universes
+            hdf5_files[key] = None
+    return mda_universes, hdf5_files
+
+def _extract_universe(mda_universe_kwargs):
+    """Deal with MDAnalysis beeing a piece of shit"""
+    coordinates = mda_universe_kwargs.pop('coordinates')
+    if not isinstance(coordinates, List):
+        coordinates = [coordinates]
+    if 'topology' in mda_universe_kwargs:
+        topology = mda_universe_kwargs.pop("topology")
+    else:
+        topology = None
+    return mda.Universe(topology, *coordinates, **mda_universe_kwargs)
 
 def get_dataset_from_mda(
     work_dir: str,
-    train_universe: mda.Universe,
-    valid_universe: Optional[mda.Universe],
+    train_universes: mda.Universe,
+    valid_universes: Optional[mda.Universe],
     valid_fraction: float,
     # config_type_weights: Dict,
-    test_universe: Optional[mda.Universe] = None,
+    test_universes: Optional[mda.Universe] = None,
+    concatenate: bool = True,
     seed: int = 1234,
     # keep_isolated_atoms: bool = False,
     head_name: str = "Default",
 ) -> Tuple[SubsetCollection, Optional[Dict[int, float]]]:
     """Load training and test dataset from xyz file"""
-    all_train_configs = data.load_from_mda_universe(
-        universe = train_universe,
-        # config_type_weights=config_type_weights,
-        # extract_atomic_energies=True,
-        # keep_isolated_atoms=keep_isolated_atoms,
-        head_name=head_name,
-    )
-    logging.info(
-        f"Training set [{len(all_train_configs)} configs, {np.sum([1 if config.energy else 0 for config in all_train_configs])} energy, {np.sum([config.forces.size for config in all_train_configs])} forces] loaded from '{train_universe}'"
-    )
-    if valid_universe is not None:
-        valid_configs = data.load_from_mda_universe(
-            universe=valid_universe,
-            # config_type_weights=config_type_weights,
-            # extract_atomic_energies=False,
-            head_name=head_name,
-        )
+    all_train_configs = []
+    for i, train_universe in enumerate(train_universes):
+        configs = data.load_from_mda_universe(universe=train_universe, head_name=head_name)
+        if concatenate:
+            all_train_configs.extend(configs)
+        else:
+            all_train_configs.append(configs)
+            logging.info(
+                f"Training set {i:d} [{len(configs)} configs, {np.sum([1 if config.energy else 0 for config in configs])} energy, {np.sum([config.forces.size for config in configs])} forces] loaded from '{train_universe}'"
+            )
+    if concatenate:
         logging.info(
-            f"Validation set [{len(valid_configs)} configs, {np.sum([1 if config.energy else 0 for config in valid_configs])} energy, {np.sum([config.forces.size for config in valid_configs])} forces] loaded from '{valid_universe}'"
+            f"Training set [{len(all_train_configs)} configs, {np.sum([1 if config.energy else 0 for config in all_train_configs])} energy, {np.sum([config.forces.size for config in all_train_configs])} forces] loaded from '{train_universes}'"
         )
+    if valid_universes is not None:
+        valid_configs = []
+        for i, valid_universe in enumerate(valid_universes):
+            configs = data.load_from_mda_universe(universe=valid_universe, head_name=head_name)
+            if concatenate:
+                valid_configs.extend(configs)
+            else:
+                valid_configs.append(configs)
+                logging.info(
+                    f"Validation set {i:d} [{len(configs)} configs, {np.sum([1 if config.energy else 0 for config in configs])} energy, {np.sum([config.forces.size for config in configs])} forces] loaded from '{valid_universe}'"
+                )
+        if concatenate:
+            logging.info(
+                f"Validation set [{len(valid_configs)} configs, {np.sum([1 if config.energy else 0 for config in valid_configs])} energy, {np.sum([config.forces.size for config in valid_configs])} forces] loaded from '{valid_universes}'"
+            )
         train_configs = all_train_configs
     else:
-        train_configs, valid_configs = data.random_train_valid_split(
-            all_train_configs, valid_fraction, seed, work_dir
-        )
-        logging.info(
-            f"Validaton set contains {len(valid_configs)} configurations [{np.sum([1 if config.energy else 0 for config in valid_configs])} energy, {np.sum([config.forces.size for config in valid_configs])} forces]"
-        )
+        if concatenate:
+            train_configs, valid_configs = data.random_train_valid_split(
+                all_train_configs, valid_fraction, seed, work_dir
+            )
+            logging.info(
+                f"Validaton set contains {len(valid_configs)} configurations [{np.sum([1 if config.energy else 0 for config in valid_configs])} energy, {np.sum([config.forces.size for config in valid_configs])} forces]"
+            )
+        else:
+            train_configs, valid_configs = [], []
+            for i, configs in enumerate(all_train_configs):
+                t_configs, v_configs = data.random_train_valid_split(
+                    configs, valid_fraction, seed, work_dir
+                )    
+                logging.info(
+                    f"Validaton set {i:d} contains {len(v_configs)} configurations [{np.sum([1 if config.energy else 0 for config in v_configs])} energy, {np.sum([config.forces.size for config in v_configs])} forces]"
+                )
+                train_configs.append(t_configs)
+                valid_configs.append(v_configs)   
 
     test_configs = []
-    if test_universe is not None:
-        all_test_configs = data.load_from_mda_universe(
-            universe=test_universe,
-            # config_type_weights=config_type_weights,
-            # extract_atomic_energies=False,
-            head_name=head_name,
-        )
-        # create list of tuples (config_type, list(Atoms))
-        test_configs = data.test_config_types(all_test_configs)
-        logging.info(
-            f"Test set ({len(all_test_configs)} configs) loaded from '{test_universe}':"
-        )
-        for name, tmp_configs in test_configs:
+    if test_universes is not None:
+        for i, test_universe in enumerate(test_universes):
+            configs = data.load_from_mda_universe(universe=test_universe, head_name=head_name)
+            if concatenate:
+                test_configs.extend(configs)
+            else:
+                test_configs.append(configs)
+                logging.info(
+                    f"Test set {i:d} ({len(configs)} configs) loaded from '{test_universe}':"
+                )
+        if concatenate:
             logging.info(
-                f"{name}: {len(tmp_configs)} configs, {np.sum([1 if config.energy else 0 for config in tmp_configs])} energy, {np.sum([config.forces.size for config in tmp_configs])} forces"
+                f"Test set {i:d} ({len(test_configs)} configs) loaded from '{test_universes}':"
             )
 
     return SubsetCollection(train=train_configs, valid=valid_configs, tests=test_configs)

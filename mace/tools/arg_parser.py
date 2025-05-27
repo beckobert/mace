@@ -5,25 +5,22 @@
 ###########################################################################################
 
 import argparse
+import configargparse
 import os
 from typing import Optional
 
 
 def build_default_arg_parser() -> argparse.ArgumentParser:
-    try:
-        import configargparse
-
-        parser = configargparse.ArgumentParser(
-            config_file_parser_class=configargparse.YAMLConfigFileParser,
-        )
-        parser.add(
-            "--config",
-            type=str,
-            is_config_file=True,
-            help="config file to agregate options",
-        )
-    except ImportError:
-        parser = argparse.ArgumentParser()
+    parser = configargparse.ArgumentParser(
+        config_file_parser_class=configargparse.YAMLConfigFileParser,
+    )
+    
+    parser.add(
+        "--config",
+        type=str,
+        is_config_file=True,
+        help="config file to agregate options",
+    )
 
     # Name and seed
     parser.add_argument("--name", help="experiment name", required=True)
@@ -268,10 +265,8 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--mda_universes",
-        help="Dict of keywords to set up a MDAnalysis universe",
         type=str,
-        default=None,
-        required=False,
+        help="Path to yaml file to set up MDAnalysis universes",
     )
     parser.add_argument(
         "--test_file",
@@ -722,7 +717,12 @@ def build_preprocess_arg_parser() -> argparse.ArgumentParser:
         help="Training set h5 file",
         type=str,
         default=None,
-        required=True,
+        required=False,
+    )
+    parser.add(
+        "--mda_universes",
+        type=str,
+        help="Path to yaml file to set up MDAnalysis universes",
     )
     parser.add_argument(
         "--valid_file",

@@ -232,7 +232,6 @@ class AtomicData(torch_geometric.data.Data):
     def from_mda_config(
         cls,
         config: Configuration,
-        universe: AtomicNumberTable,
         cutoff: float,
         heads: Optional[list] = None,
     ) -> "AtomicData":
@@ -241,9 +240,9 @@ class AtomicData(torch_geometric.data.Data):
         edge_index, shifts, unit_shifts, cell = get_neighborhood(
             positions=config.positions, cutoff=cutoff, pbc=config.pbc, cell=config.cell
         )
-        residues = np.unique(universe.residues.resnames)
+        residues = np.unique(config.universe.residues.resnames)
         indices = torch.tensor(
-            np.searchsorted(residues, (universe.residues.resnames)),
+            np.searchsorted(residues, (config.universe.residues.resnames)),
             dtype=torch.int64
         )
         one_hot = to_one_hot(
@@ -279,6 +278,11 @@ class AtomicData(torch_geometric.data.Data):
             if config.forces is not None
             else None
         )
+        energy = (
+            torch.tensor(config.energy, dtype=torch.get_default_dtype())
+            if config.energy is not None
+            else 0
+        )
 
         return cls(
             edge_index=torch.tensor(edge_index, dtype=torch.long),
@@ -294,7 +298,7 @@ class AtomicData(torch_geometric.data.Data):
             stress_weight=torch.tensor(0, dtype=torch.get_default_dtype()),
             virials_weight=torch.tensor(0, dtype=torch.get_default_dtype()),
             forces=forces,
-            energy=None,
+            energy=energy,
             stress=None,
             virials=None,
             dipole=None,
