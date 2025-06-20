@@ -177,6 +177,8 @@ def run(args: argparse.Namespace):
     # Data preparation
     with open(args.mda_universes, "r") as f:
         args.mda_universes, hdf5_files = get_mda_universes(yaml.safe_load(f))
+    if hdf5_files["valid"] is None and "valid_fraction" in args:
+        hdf5_files["valid"] = hdf5_files["train"]
     collections = get_dataset_from_mda(
         work_dir=args.work_dir,
         train_universes=args.mda_universes['train'],
