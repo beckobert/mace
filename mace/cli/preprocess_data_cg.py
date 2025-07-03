@@ -48,47 +48,6 @@ def compute_stats_target(
     return output
 
 
-def pool_compute_stats(inputs: List):
-    path_to_files, z_table, r_max, atomic_energies, mda_universe, batch_size, num_process = inputs
-
-    with mp.Pool(processes=num_process) as pool:
-        re = [
-            pool.apply_async(
-                compute_stats_target,
-                args=(
-                    file,
-                    z_table,
-                    r_max,
-                    atomic_energies,
-                    batch_size,
-                    mda_universe,
-                ),
-            )
-            for file in glob(path_to_files + "/*")
-        ]
-
-        pool.close()
-        pool.join()
-
-    results = [r.get() for r in tqdm.tqdm(re)]
-
-    if not results:
-        raise ValueError(
-            "No results were computed. Check if the input files exist and are readable."
-        )
-
-    # Separate avg_num_neighbors, mean, and std
-    avg_num_neighbors = np.mean([r[0] for r in results])
-    means = np.array([r[1] for r in results])
-    stds = np.array([r[2] for r in results])
-
-    # Compute averages
-    mean = np.mean(means, axis=0).item()
-    std = np.mean(stds, axis=0).item()
-
-    return avg_num_neighbors, mean, std
-
-
 def split_array(a: np.ndarray, max_size: int):
     drop_last = False
     if len(a) % 2 == 1:
@@ -189,9 +148,9 @@ def run(args: argparse.Namespace):
         seed=args.seed,
     )
 
-    residues = np.array([mda_universe.residues.resnames for mda_universe in args.mda_universes["train"]])
-    residues = np.unique(residues.flatten())
-    z_table = AtomicNumberTable(list(range(np.unique(residues).shape[0]))) # Create fake z table
+    residues = np.concatenate([mda_universe.residues.resnames for mda_universe in args.mda_universes["train"]])
+    residues = np.unique(residues)
+    z_table = AtomicNumberTable(list(range(residues.shape[0]))) # Create fake z table
     E0s = ",".join([f"{z:d}: 0.0" for z in z_table.zs])
     E0s = "{" + E0s + "}"
     atomic_energies_dict = get_atomic_energies(E0s, None, z_table)
@@ -225,9 +184,15 @@ def run(args: argparse.Namespace):
         means = []
         stds = []
         n_strucs = []
-        for mda_universe in args.mda_universes["train"]:
-            _inputs = [args.h5_prefix+'train', z_table, args.r_max, atomic_energies, mda_universe, args.batch_size, args.num_process]
-            avg_num_neighbors, mean, std=pool_compute_stats(_inputs)
+        for mda_universe, hdf5_file in zip(args.mda_universes["train"], hdf5_files["train"]):
+            avg_num_neighbors, mean, std = compute_stats_target(
+                f"{args.h5_prefix}train/{hdf5_file}",
+                z_table,
+                args.r_max,
+                atomic_energies,
+                args.batch_size,
+                mda_universe,
+            )
             avgs_num_neighbors.append(avg_num_neighbors)
             means.append(mean)
             stds.append(std)
