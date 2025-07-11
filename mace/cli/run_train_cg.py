@@ -6,57 +6,43 @@
 
 import argparse
 import ast
-import glob
 import json
 import logging
-import os
 import yaml
 from copy import deepcopy
 from pathlib import Path
 from typing import List, Optional
 
-import numpy as np
-import torch.distributed
 import torch.nn.functional
 from e3nn.util import jit
-from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import ConcatDataset
 from torch_ema import ExponentialMovingAverage
-from icecream import ic
 
 import mace
 from mace import data, tools
-from mace.calculators.foundations_models import mace_mp, mace_off
 from mace.tools import torch_geometric
 from mace.tools.model_script_utils import configure_model
 from mace.tools.multihead_tools import (
     HeadConfig,
-    assemble_mp_data,
     dict_head_to_dataclass,
     prepare_default_head,
 )
 from mace.tools.scripts_utils import (
     LRScheduler,
-    check_path_ase_read,
     convert_to_json_format,
     create_error_table,
     dict_to_array,
     extract_config_mace_model,
     get_atomic_energies,
     get_avg_num_neighbors,
-    get_config_type_weights,
     get_dataset_from_mda,
-    get_dataset_from_xyz,
-    get_files_with_suffix,
     get_loss_fn,
     get_mda_universes,
     get_optimizer,
     get_params_options,
-    get_swa,
     print_git_commit,
     setup_wandb,
 )
-from mace.tools.slurm_distributed import DistributedEnvironment
 from mace.tools.utils import AtomicNumberTable
 
 
@@ -163,7 +149,7 @@ def run(args: argparse.Namespace) -> None:
     for head_config in head_configs:
         for mda_universe in head_config.mda_universes["train"]:
             residues.append(mda_universe.residues.resnames)
-    z_table = AtomicNumberTable(list(range(np.unique(residues).shape[0]))) # Create fake z table
+    z_table = AtomicNumberTable(list(range(residues.shape[0]))) # Create fake z table
     E0s = ",".join([f"{z:d}: 0.0" for z in z_table.zs])
     E0s = "{" + E0s + "}"
     # ic(E0s)
