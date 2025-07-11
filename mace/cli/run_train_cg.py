@@ -13,6 +13,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import List, Optional
 
+import numpy as np
 import torch.nn.functional
 from e3nn.util import jit
 from torch.utils.data import ConcatDataset
@@ -82,11 +83,14 @@ def run(args: argparse.Namespace) -> None:
     if args.mda_universes is not None:
         with open(args.mda_universes, "r") as f:
             args.mda_universes, hdf5_files = get_mda_universes(yaml.safe_load(f))
+        if hdf5_files["valid"] is None and "valid_fraction" in args:
+            hdf5_files["valid"] = hdf5_files["train"]
     for arg in [args.train_file, args.valid_file, args.test_file]:
         if arg is not None:
             logging.warning(
                 'CG mode only supports giving datasets through mda-universes and directories to HDF5 files'
             )
+    if args.heads is not None:
         args.heads = ast.literal_eval(args.heads)
     else:
         args.heads = prepare_default_head(args)
@@ -147,6 +151,7 @@ def run(args: argparse.Namespace) -> None:
     for head_config in head_configs:
         for mda_universe in head_config.mda_universes["train"]:
             residues.append(mda_universe.residues.resnames)
+    residues = np.unique(np.concatenate(residues))
     z_table = AtomicNumberTable(list(range(residues.shape[0]))) # Create fake z table
     E0s = ",".join([f"{z:d}: 0.0" for z in z_table.zs])
     E0s = "{" + E0s + "}"
