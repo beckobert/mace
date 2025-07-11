@@ -87,8 +87,6 @@ def run(args: argparse.Namespace) -> None:
             logging.warning(
                 'CG mode only supports giving datasets through mda-universes and directories to HDF5 files'
             )
-    ic(args.mda_universes)
-    if args.heads is not None:
         args.heads = ast.literal_eval(args.heads)
     else:
         args.heads = prepare_default_head(args)
