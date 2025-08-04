@@ -240,7 +240,7 @@ class AtomicData(torch_geometric.data.Data):
         edge_index, shifts, unit_shifts, cell = get_neighborhood(
             positions=config.positions, cutoff=cutoff, pbc=config.pbc, cell=config.cell
         )
-        residues = np.unique(config.universe.residues.resnames)
+        residues = config.residues
         indices = torch.tensor(
             np.searchsorted(residues, (config.universe.residues.resnames)),
             dtype=torch.int64

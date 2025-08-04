@@ -66,7 +66,7 @@ def run(args: argparse.Namespace) -> None:
 
     # Load data and prepare input
     u = mda.Universe(args.topology, *[args.coordinates])
-    configs = data.load_from_mda_universe(universe=u)
+    configs = data.load_from_mda_universe(universe=u, residues=model.residues)
 
     data_loader = torch_geometric.dataloader.DataLoader(
         dataset=[

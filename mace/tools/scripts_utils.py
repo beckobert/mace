@@ -159,6 +159,7 @@ def _extract_universe(mda_universe_kwargs):
 
 def get_dataset_from_mda(
     work_dir: str,
+    residues: np.ndarray,
     train_universes: mda.Universe,
     valid_universes: Optional[mda.Universe],
     valid_fraction: float,
@@ -172,7 +173,7 @@ def get_dataset_from_mda(
     """Load training and test dataset from xyz file"""
     all_train_configs = []
     for i, train_universe in enumerate(train_universes):
-        configs = data.load_from_mda_universe(universe=train_universe, head_name=head_name)
+        configs = data.load_from_mda_universe(universe=train_universe, residues=residues, head_name=head_name)
         if concatenate:
             all_train_configs.extend(configs)
         else:
@@ -187,7 +188,7 @@ def get_dataset_from_mda(
     if valid_universes is not None:
         valid_configs = []
         for i, valid_universe in enumerate(valid_universes):
-            configs = data.load_from_mda_universe(universe=valid_universe, head_name=head_name)
+            configs = data.load_from_mda_universe(universe=valid_universe, residues=residues, head_name=head_name)
             if concatenate:
                 valid_configs.extend(configs)
             else:
@@ -223,7 +224,7 @@ def get_dataset_from_mda(
     test_configs = []
     if test_universes is not None:
         for i, test_universe in enumerate(test_universes):
-            configs = data.load_from_mda_universe(universe=test_universe, head_name=head_name)
+            configs = data.load_from_mda_universe(universe=test_universe, residues=residues, head_name=head_name)
             if concatenate:
                 test_configs.extend(configs)
             else:

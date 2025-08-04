@@ -96,8 +96,11 @@ def run(args: argparse.Namespace) -> None:
         args.heads = prepare_default_head(args)
 
     logging.info("===========LOADING INPUT DATA===========")
+    
     heads = list(args.heads.keys())
+    residues = None
     logging.info(f"Using heads: {heads}")
+
     head_configs: List[HeadConfig] = []
     for head, head_args in args.heads.items():
         logging.info(f"=============    Processing head {head}     ===========")
@@ -114,6 +117,7 @@ def run(args: argparse.Namespace) -> None:
             head_config.std = statistics["std"]
             head_config.avg_num_neighbors = statistics["avg_num_neighbors"]
             head_config.compute_avg_num_neighbors = False
+            residues = statistics["residues"]
             if isinstance(statistics["atomic_energies"], str) and statistics[
                 "atomic_energies"
             ].endswith(".json"):
@@ -126,7 +130,23 @@ def run(args: argparse.Namespace) -> None:
                 head_config.atomic_energies_dict = ast.literal_eval(
                     statistics["atomic_energies"]
                 )
+        head_configs.append(head_config)
 
+    logging.info(f"No Atomic Numbers/Energies due to coarse graining mode.")
+    if residues is not None:
+        residues = []
+        for head_config in head_configs:
+            for mda_universe in head_config.mda_universes["train"]:
+                residues.append(mda_universe.residues.resnames)
+        residues = np.unique(np.concatenate(residues))
+    z_table = AtomicNumberTable(list(range(residues.shape[0]))) # Create fake z table
+    E0s = ",".join([f"{z:d}: 0.0" for z in z_table.zs])
+    E0s = "{" + E0s + "}"
+    # This creates an atomic energy dict where zs from z_table are missing. But since E0s are useless in CG, we don't care.
+    # This dict is just a formality
+    atomic_energies_dict = {i: 0.0 for i in range(residues.shape[0])}
+
+    for head_config in head_configs:
         # Data preparation
         if hdf5_files["train"] is None:
             collections = get_dataset_from_mda(
@@ -135,30 +155,16 @@ def run(args: argparse.Namespace) -> None:
                 valid_universes=head_config.mda_universes["valid"],
                 valid_fraction=head_config.valid_fraction,
                 test_universes=head_config.mda_universes["test"],
+                residues=residues,
                 seed=args.seed,
                 head_name=head_config.head_name,
             )
             head_config.collections = collections
         elif hdf5_files["train"] is not None and head_config.mda_universes["valid"] is None:
             head_config.mda_universes["valid"] = head_config.mda_universes["train"]
-        head_configs.append(head_config)
 
     # Atomic number table
     # yapf: disable
-
-    logging.info(f"No Atomic Numbers/Energies due to coarse graining mode.")
-    residues = []
-    for head_config in head_configs:
-        for mda_universe in head_config.mda_universes["train"]:
-            residues.append(mda_universe.residues.resnames)
-    residues = np.unique(np.concatenate(residues))
-    z_table = AtomicNumberTable(list(range(residues.shape[0]))) # Create fake z table
-    E0s = ",".join([f"{z:d}: 0.0" for z in z_table.zs])
-    E0s = "{" + E0s + "}"
-    # ic(E0s)
-    atomic_energies_dict = {}
-    for head_config in head_configs:
-        atomic_energies_dict[head_config.head_name] = get_atomic_energies(E0s, None, z_table)
 
     dipole_only = False
     args.compute_dipole = False
@@ -243,6 +249,8 @@ def run(args: argparse.Namespace) -> None:
 
     # Model
     model, output_args = configure_model(args, train_loader, atomic_energies, None, heads, z_table)
+    # Add residues
+    model.residues = residues
     model.to(device)
 
     logging.debug(model)

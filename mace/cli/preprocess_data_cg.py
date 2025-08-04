@@ -135,15 +135,6 @@ def run(args: argparse.Namespace):
         args.mda_universes, hdf5_files = get_mda_universes(yaml.safe_load(f))
     if hdf5_files["valid"] is None and "valid_fraction" in args:
         hdf5_files["valid"] = hdf5_files["train"]
-    collections = get_dataset_from_mda(
-        work_dir=args.work_dir,
-        train_universes=args.mda_universes['train'],
-        valid_universes=args.mda_universes['valid'],
-        valid_fraction=args.valid_fraction,
-        test_universes=args.mda_universes['test'],
-        concatenate=False,
-        seed=args.seed,
-    )
 
     residues = np.concatenate([mda_universe.residues.resnames for mda_universe in args.mda_universes["train"]])
     residues = np.unique(residues)
@@ -151,6 +142,17 @@ def run(args: argparse.Namespace):
     E0s = ",".join([f"{z:d}: 0.0" for z in z_table.zs])
     E0s = "{" + E0s + "}"
     atomic_energies_dict = get_atomic_energies(E0s, None, z_table)
+
+    collections = get_dataset_from_mda(
+        work_dir=args.work_dir,
+        residues=residues,
+        train_universes=args.mda_universes['train'],
+        valid_universes=args.mda_universes['valid'],
+        valid_fraction=args.valid_fraction,
+        test_universes=args.mda_universes['test'],
+        concatenate=False,
+        seed=args.seed,
+    )
 
     logging.info("Preparing training set")
     if args.shuffle:
@@ -207,6 +209,7 @@ def run(args: argparse.Namespace):
             "std": weighted_mean(stds, n_strucs),
             "atomic_numbers": str(z_table.zs),
             "r_max": args.r_max,
+            "residues": residues,
         }
 
         with open(args.h5_prefix + "statistics.json", "w") as f: # pylint: disable=W1514

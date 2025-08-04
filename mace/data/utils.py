@@ -24,6 +24,7 @@ Virials = np.ndarray  # [6, ], [3,3], [9, ]
 Charges = np.ndarray  # [..., 1]
 Cell = np.ndarray  # [3,3]
 Pbc = tuple  # (3,)
+Residues = np.ndarray
 
 DEFAULT_CONFIG_TYPE = "Default"
 DEFAULT_CONFIG_TYPE_WEIGHTS = {DEFAULT_CONFIG_TYPE: 1.0}
@@ -49,6 +50,7 @@ class Configuration:
     virials_weight: float = 1.0  # weight of config virial in loss
     config_type: Optional[str] = DEFAULT_CONFIG_TYPE  # config_type of config
     head: Optional[str] = "Default"  # head used to compute the config
+    residues: Optional[Residues] = None  # Residues used for model
     universe: Optional[mda.Universe] = None # MDAnalysis universe with topology info
 
 
@@ -303,7 +305,7 @@ def load_from_xyz(
     )
     return atomic_energies_dict, configs
 
-def load_from_mda_universe(universe, head_name="default"):
+def load_from_mda_universe(universe, residues, head_name="default"):
     force_unit = 0.01036427 # converting kJ/mol/Ang to eV/Ang
     
     all_configs = []
@@ -332,6 +334,7 @@ def load_from_mda_universe(universe, head_name="default"):
             config_type="Default",
             pbc=[structure.triclinic_dimensions is not None] * 3,
             cell=cell,
+            residues=residues,
             universe=universe,
         )
         all_configs.append(config)

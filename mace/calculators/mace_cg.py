@@ -225,7 +225,12 @@ class MACECalculator_CG(Calculator):
         # Set up batch mask
         universe = mda.Universe(cg_topology)
         self.universe = universe
-        config = data.load_from_mda_universe(universe)[0]
+        # Ensure that all models are build for the same references
+        model_residues = [model.residues for model in self.models]
+        if len(set(tuple(lst) for lst in model_residues)) != 1:
+            raise ValueError("Residues of all loaded models must be the same")
+        # config = data.load_from_mda_universe(universe, residues=np.unique(universe.residues.resnames))[0]
+        config = data.load_from_mda_universe(universe, residues=self.models[0].residues)[0]
 
         data_loader = torch_geometric.dataloader.DataLoader(
             dataset=[
