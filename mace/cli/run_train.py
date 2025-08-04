@@ -451,15 +451,13 @@ def run(args: argparse.Namespace) -> None:
         if head_config.mda_universes is not None:
             train_sets[head_config.head_name] = [
                 data.AtomicData.from_mda_config(
-                    config, universe=head_config.mda_universes["train"],
-                    cutoff=args.r_max, heads=heads,
+                    config, cutoff=args.r_max, heads=heads,
                 )
                 for config in head_config.collections.train
             ]
             valid_sets[head_config.head_name] = [
                 data.AtomicData.from_mda_config(
-                    config, universe=head_config.mda_universes["train"],
-                    cutoff=args.r_max, heads=heads,
+                    config, cutoff=args.r_max, heads=heads,
                 )
                 for config in head_config.collections.valid
             ]

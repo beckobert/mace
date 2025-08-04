@@ -235,7 +235,7 @@ class MACECalculator_CG(Calculator):
         data_loader = torch_geometric.dataloader.DataLoader(
             dataset=[
                 data.AtomicData.from_mda_config(
-                    config, universe=universe, cutoff=self.r_max, heads=self.heads
+                    config, cutoff=self.r_max, heads=self.heads
                 )
             ],
             batch_size=1,
@@ -301,7 +301,7 @@ class MACECalculator_CG(Calculator):
         batch = self._clone_batch(self.batch_mask)
         batch["cell"] = batch_atoms["cell"]
         batch["positions"] = batch_atoms["positions"]
-        batch["shifts"] = batch_atoms["shift"]
+        batch["shifts"] = batch_atoms["shifts"]
         batch["unit_shifts"] = batch_atoms["unit_shifts"]
         batch["edge_index"] = batch_atoms["edge_index"]
         return batch

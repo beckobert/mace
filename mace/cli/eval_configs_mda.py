@@ -71,7 +71,7 @@ def run(args: argparse.Namespace) -> None:
     data_loader = torch_geometric.dataloader.DataLoader(
         dataset=[
             data.AtomicData.from_mda_config(
-                config, universe=u, cutoff=float(model.r_max)
+                config, cutoff=float(model.r_max)
             )
             for config in configs
         ],

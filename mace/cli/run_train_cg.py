@@ -176,7 +176,7 @@ def run(args: argparse.Namespace) -> None:
     valid_sets = {head: [] for head in heads}
     train_sets = {head: [] for head in heads}
     for head_config in head_configs:
-        if hdf5_files is None:
+        if hdf5_files["train"] is None:
             train_sets[head_config.head_name] = [
                 data.AtomicData.from_mda_config(
                     config, cutoff=args.r_max, heads=heads,
