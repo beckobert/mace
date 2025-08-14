@@ -240,13 +240,13 @@ class AtomicData(torch_geometric.data.Data):
         edge_index, shifts, unit_shifts, cell = get_neighborhood(
             positions=config.positions, cutoff=cutoff, pbc=config.pbc, cell=config.cell
         )
-        residues = config.residues
+        model_residues = config.model_residues
         indices = torch.tensor(
-            np.searchsorted(residues, (config.universe.residues.resnames)),
+            np.searchsorted(model_residues, (config.universe.residues.resnames)),
             dtype=torch.int64
         )
         one_hot = to_one_hot(
-            indices=indices.unsqueeze(-1), num_classes=residues.shape[0]
+            indices=indices.unsqueeze(-1), num_classes=model_residues.shape[0]
         )
         try:
             head = torch.tensor(heads.index(config.head), dtype=torch.long)

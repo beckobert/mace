@@ -145,7 +145,7 @@ def run(args: argparse.Namespace):
 
     collections = get_dataset_from_mda(
         work_dir=args.work_dir,
-        residues=residues,
+        model_residues=residues,
         train_universes=args.mda_universes['train'],
         valid_universes=args.mda_universes['valid'],
         valid_fraction=args.valid_fraction,
@@ -178,7 +178,6 @@ def run(args: argparse.Namespace):
         atomic_energies: np.ndarray = np.array(
             [atomic_energies_dict[z] for z in z_table.zs]
         )
-        logging.info(f"Atomic Energies: {atomic_energies.tolist()}")
         avgs_num_neighbors = []
         means = []
         stds = []
@@ -209,7 +208,7 @@ def run(args: argparse.Namespace):
             "std": weighted_mean(stds, n_strucs),
             "atomic_numbers": str(z_table.zs),
             "r_max": args.r_max,
-            "residues": residues,
+            "model_residues": list(residues),
         }
 
         with open(args.h5_prefix + "statistics.json", "w") as f: # pylint: disable=W1514

@@ -50,7 +50,7 @@ class Configuration:
     virials_weight: float = 1.0  # weight of config virial in loss
     config_type: Optional[str] = DEFAULT_CONFIG_TYPE  # config_type of config
     head: Optional[str] = "Default"  # head used to compute the config
-    residues: Optional[Residues] = None  # Residues used for model
+    model_residues: Optional[Residues] = None  # Residues used for model
     universe: Optional[mda.Universe] = None # MDAnalysis universe with topology info
 
 
@@ -305,7 +305,7 @@ def load_from_xyz(
     )
     return atomic_energies_dict, configs
 
-def load_from_mda_universe(universe, residues, head_name="default"):
+def load_from_mda_universe(universe, model_residues, head_name="default"):
     force_unit = 0.01036427 # converting kJ/mol/Ang to eV/Ang
     
     all_configs = []
@@ -334,7 +334,7 @@ def load_from_mda_universe(universe, residues, head_name="default"):
             config_type="Default",
             pbc=[structure.triclinic_dimensions is not None] * 3,
             cell=cell,
-            residues=residues,
+            model_residues=model_residues,
             universe=universe,
         )
         all_configs.append(config)
@@ -440,6 +440,7 @@ def save_configurations_as_HDF5(configurations: Configurations, _, h5_file) -> N
         subgroup["stress_weight"] = write_value(config.stress_weight)
         subgroup["virials_weight"] = write_value(config.virials_weight)
         subgroup["config_type"] = write_value(config.config_type)
+        subgroup["model_residues"] = write_value(config.model_residues)
 
 
 def write_value(value):

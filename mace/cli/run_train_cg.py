@@ -117,7 +117,7 @@ def run(args: argparse.Namespace) -> None:
             head_config.std = statistics["std"]
             head_config.avg_num_neighbors = statistics["avg_num_neighbors"]
             head_config.compute_avg_num_neighbors = False
-            residues = statistics["residues"]
+            residues = np.array(statistics["model_residues"])
             if isinstance(statistics["atomic_energies"], str) and statistics[
                 "atomic_energies"
             ].endswith(".json"):
@@ -155,7 +155,7 @@ def run(args: argparse.Namespace) -> None:
                 valid_universes=head_config.mda_universes["valid"],
                 valid_fraction=head_config.valid_fraction,
                 test_universes=head_config.mda_universes["test"],
-                residues=residues,
+                model_residues=residues,
                 seed=args.seed,
                 head_name=head_config.head_name,
             )

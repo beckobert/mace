@@ -2,6 +2,7 @@ from glob import glob
 from typing import List
 
 import h5py
+import numpy as np
 from torch.utils.data import ConcatDataset, Dataset
 
 from mace.data.atomic_data import AtomicData
@@ -66,6 +67,7 @@ class HDF5Dataset(Dataset):
             config_type=unpack_value(subgrp["config_type"][()]),
             pbc=unpack_value(subgrp["pbc"][()]),
             cell=unpack_value(subgrp["cell"][()]),
+            model_residues=unpack_residues(subgrp["model_residues"][()]),
         )
         if config.head is None:
             config.head = self.kwargs.get("head")
@@ -109,3 +111,10 @@ def combine_hdf5_datasets(
 def unpack_value(value):
     value = value.decode("utf-8") if isinstance(value, bytes) else value
     return None if str(value) == "None" else value
+
+def unpack_residues(value):
+    unpack_value(value)
+    if isinstance(value, np.ndarray):
+        value = np.array([v.decode("utf-8") for v in value])
+    return value
+    
