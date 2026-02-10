@@ -10,6 +10,7 @@ import dataclasses
 import json
 import logging
 import os
+import yaml
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -18,10 +19,12 @@ import numpy as np
 import torch
 import torch.distributed
 from e3nn import o3
+from icecream import ic
 from prettytable import PrettyTable
 from torch.optim.swa_utils import SWALR, AveragedModel
 
 from mace import data, modules, tools
+from mace.modules import coarse_graining
 from mace.tools import evaluate
 from mace.tools.train import SWAContainer
 
@@ -125,26 +128,23 @@ def get_dataset_from_xyz(
         atomic_energies_dict,
     )
 
-def get_mda_universes(mda_universes_kwargs):
+def get_mda_universes(args):
+    with open(args.mda_universes, "r") as f:
+        mda_kwargs = yaml.safe_load(f)
     mda_universes = {}
-    hdf5_files = {}
+    mda_universes["hdf5"] = mda_kwargs["hdf5"] if "hdf5" in mda_kwargs.keys() else False
     for key in ['train', 'valid', 'test']:
-        if key in mda_universes_kwargs.keys():
-            mda_universes[key] = []
-            hdf5_files[key] = []
-            if isinstance(mda_universes_kwargs[key], List):
-                for mda_universe_kwargs in mda_universes_kwargs[key]:
-                    mda_universes[key].append(_extract_universe(mda_universe_kwargs))
-                    hdf5_files[key].append(mda_universe_kwargs.pop('hdf5_file', None))
-            elif isinstance(mda_universes_kwargs[key], Dict):
-                mda_universes[key].append(_extract_universe(mda_universes_kwargs[key]))
-                hdf5_files[key].append(mda_universes_kwargs[key].pop('hdf5_file', None))
-            if all(x is None for x in hdf5_files[key]):
-                hdf5_files[key] = None
+        if key in mda_kwargs.keys():
+            mda_universes[key] = {}
+            if not isinstance(mda_kwargs[key], List):
+                raise TypeError(f'Items of {key} should be of type list')
+            for universe_kwargs in mda_kwargs[key]:
+                universe_dict = {}
+                universe_dict["universe"] = _extract_universe(universe_kwargs)
+                mda_universes[key][universe_kwargs["name"]] = universe_dict
         else:
             mda_universes[key] = None
-            hdf5_files[key] = None
-    return mda_universes, hdf5_files
+    return mda_universes
 
 def _extract_universe(mda_universe_kwargs):
     """Deal with MDAnalysis beeing a piece of shit"""
@@ -158,6 +158,7 @@ def _extract_universe(mda_universe_kwargs):
     return mda.Universe(topology, *coordinates, **mda_universe_kwargs)
 
 def get_dataset_from_mda(
+    args: argparse.Namespace,
     work_dir: str,
     model_residues: np.ndarray,
     train_universes: mda.Universe,
@@ -172,33 +173,39 @@ def get_dataset_from_mda(
 ) -> Tuple[SubsetCollection, Optional[Dict[int, float]]]:
     """Load training and test dataset from xyz file"""
     all_train_configs = []
-    for i, train_universe in enumerate(train_universes):
-        configs = data.load_from_mda_universe(universe=train_universe, model_residues=model_residues, head_name=head_name)
+    for k, train_universe in train_universes.items():
+        configs = data.load_from_mda_universe(universe=train_universe["universe"], model_residues=model_residues, head_name=head_name)
+        if args.biasing_potential is not None:
+            configs = coarse_graining.subtract_bias_potential(configs, train_universe["bias_potential"], args=args)
         if concatenate:
             all_train_configs.extend(configs)
         else:
             all_train_configs.append(configs)
             logging.info(
-                f"Training set {i:d} [{len(configs)} configs, {np.sum([1 if config.energy else 0 for config in configs])} energy, {np.sum([config.forces.size for config in configs])} forces] loaded from '{train_universe}'"
+                f"Training set {k} [{len(configs)} configs, {np.sum([1 if config.energy else 0 for config in configs])} energy, {np.sum([config.forces.size for config in configs])} forces] loaded from '{k}' ({train_universe['universe']} with {len(train_universe['bias_potential']):d} biasing potentials)"
             )
     if concatenate:
+        universes_log = [f"{k}: {universe['universe']} with {len(universe['bias_potential']):d} biasing potentials" + "\n" for k, universe in train_universes.items()]
         logging.info(
-            f"Training set [{len(all_train_configs)} configs, {np.sum([1 if config.energy else 0 for config in all_train_configs])} energy, {np.sum([config.forces.size for config in all_train_configs])} forces] loaded from '{train_universes}'"
+            f"Training set [{len(all_train_configs)} configs, {np.sum([1 if config.energy else 0 for config in all_train_configs])} energy, {np.sum([config.forces.size for config in all_train_configs])} forces] loaded from\n{''.join(universes_log)}"
         )
     if valid_universes is not None:
         valid_configs = []
-        for i, valid_universe in enumerate(valid_universes):
-            configs = data.load_from_mda_universe(universe=valid_universe, model_residues=model_residues, head_name=head_name)
+        for k, valid_universe in valid_universes.items():
+            configs = data.load_from_mda_universe(universe=valid_universe["universe"], model_residues=model_residues, head_name=head_name)
+            if args.biasing_potential is not None:
+                configs = coarse_graining.subtract_bias_potential(configs, valid_universe["bias_potential"], args=args)
             if concatenate:
                 valid_configs.extend(configs)
             else:
                 valid_configs.append(configs)
                 logging.info(
-                    f"Validation set {i:d} [{len(configs)} configs, {np.sum([1 if config.energy else 0 for config in configs])} energy, {np.sum([config.forces.size for config in configs])} forces] loaded from '{valid_universe}'"
+                    f"Validation set {k:d} [{len(configs)} configs, {np.sum([1 if config.energy else 0 for config in configs])} energy, {np.sum([config.forces.size for config in configs])} forces] loaded from '{k}' ({valid_universe['universe']} with {len(valid_universe['bias_potential']):d} biasing potentials)"
                 )
         if concatenate:
+            universes_log = [f"{k}: {universe['universe']} with {len(universe['bias_potential']):d} biasing potentials" + "\n" for k, universe in valid_universes.items()]
             logging.info(
-                f"Validation set [{len(valid_configs)} configs, {np.sum([1 if config.energy else 0 for config in valid_configs])} energy, {np.sum([config.forces.size for config in valid_configs])} forces] loaded from '{valid_universes}'"
+                f"Validation set [{len(valid_configs)} configs, {np.sum([1 if config.energy else 0 for config in valid_configs])} energy, {np.sum([config.forces.size for config in valid_configs])} forces] loaded from\n{''.join(universes_log)}"
             )
         train_configs = all_train_configs
     else:
@@ -223,18 +230,21 @@ def get_dataset_from_mda(
 
     test_configs = []
     if test_universes is not None:
-        for i, test_universe in enumerate(test_universes):
-            configs = data.load_from_mda_universe(universe=test_universe, model_residues=model_residues, head_name=head_name)
+        for k, test_universe in test_universes.items():
+            configs = data.load_from_mda_universe(universe=test_universe["universe"], model_residues=model_residues, head_name=head_name)
+            if args.biasing_potential is not None:
+                configs = coarse_graining.subtract_bias_potential(configs, test_universe["bias_potential"], args=args)
             if concatenate:
                 test_configs.extend(configs)
             else:
                 test_configs.append(configs)
                 logging.info(
-                    f"Test set {i:d} ({len(configs)} configs) loaded from '{test_universe}':"
+                    f"Test set {k:d} ({len(configs)} configs) loaded from '{k}' ({test_universe['universe']} with {len(test_universe['bias_potential']):d} biasing potentials):"
                 )
         if concatenate:
+            universes_log = [f"{k}: {universe['universe']} with {len(universe['bias_potential']):d} biasing potentials" + "\n" for k, universe in test_universes.items()]
             logging.info(
-                f"Test set {i:d} ({len(test_configs)} configs) loaded from '{test_universes}':"
+                f"Test set {k:d} ({len(test_configs)} configs) loaded from \n{''.join(universes_log)}"
             )
 
     return SubsetCollection(train=train_configs, valid=valid_configs, tests=test_configs)
@@ -833,6 +843,12 @@ def create_error_table(
             "relative F MAE %",
             "MAE Stress (Virials) / meV / A (A^3)",
         ]
+    elif table_type == "ForceRMSE":
+        table.field_names = [
+            "config_type",
+            "RMSE F / meV / A",
+            "relative F RMSE %",
+        ]
     elif table_type == "TotalMAE":
         table.field_names = [
             "config_type",
@@ -961,6 +977,14 @@ def create_error_table(
                     f"{metrics['mae_f'] * 1000:8.1f}",
                     f"{metrics['rel_mae_f']:8.2f}",
                     f"{metrics['mae_virials'] * 1000:8.1f}",
+                ]
+            )
+        elif table_type == "ForceRMSE":
+            table.add_row(
+                [
+                    name,
+                    f"{metrics['rmse_f'] * 1000:8.1f}",
+                    f"{metrics['rel_rmse_f']:8.2f}",
                 ]
             )
         elif table_type == "TotalMAE":

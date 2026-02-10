@@ -269,6 +269,13 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         help="Path to yaml file to set up MDAnalysis universes",
     )
     parser.add_argument(
+        "--biasing_potential",
+        help="path to a file describing the biasing potential",
+        type=str,
+        default=None,
+        required=False
+    )
+    parser.add_argument(
         "--test_file",
         help="Test set .xyz pt .h5 file",
         type=str,
@@ -827,7 +834,13 @@ def build_preprocess_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=16,
     )
-
+    parser.add_argument(
+        "--biasing_potential",
+        help="path to a file describing the biasing potential",
+        type=str,
+        default=None,
+        required=False
+    )
     parser.add_argument(
         "--scaling",
         help="type of scaling to the output",

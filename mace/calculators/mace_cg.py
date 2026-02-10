@@ -14,16 +14,19 @@ import ase
 import ase.io
 import MDAnalysis as mda
 import numpy as np
+import numpy.linalg as la
 import torch
 from ase.calculators.calculator import Calculator, all_changes
 from ase.stress import full_3x3_to_voigt_6_stress
 from e3nn import o3
+from icecream import ic
 
 from mace import data
 # from mace.cli.convert_e3nn_cueq import run as run_e3nn_to_cueq
-from mace.modules.utils import extract_invariant
+from mace.modules.utils import extract_invariant, get_edge_vectors_and_lengths
 from mace.tools import torch_geometric, torch_tools, utils
 from mace.tools.compile import prepare
+from mace.modules.coarse_graining import calculate_bias_potential, read_biasing_potential
 from mace.tools.scripts_utils import extract_model
 
 
@@ -67,6 +70,7 @@ class MACECalculator_CG(Calculator):
         compile_mode=None,
         fullgraph=True,
         enable_cueq=False,
+        bias_potential_fn=None,
         **kwargs,
     ):
         Calculator.__init__(self, **kwargs)
@@ -242,6 +246,23 @@ class MACECalculator_CG(Calculator):
             drop_last=False,
         )
         self.batch_mask = next(iter(data_loader)).to(self.device)
+        # ic(self.batch_mask['shifts'].shape)
+
+        if bias_potential_fn is None:
+            self.bias_potential = None
+        else:
+            self.bias_potential = []
+            if not isinstance(bias_potential_fn, List):
+                bias_potential_fn = [bias_potential_fn]
+            for fn in bias_potential_fn:
+                bias_potential = read_biasing_potential(fn, training=False)["Calculator"]
+                self.bias_potential.append({
+                    "pairs_harm": [[p[0], p[1]] for p in bias_potential if len(p[2]) == 3],
+                    "coefficients_harm": [p[2] for p in bias_potential if len(p[2]) == 3],
+                    "pairs_rep": [[p[0], p[1]] for p in bias_potential if len(p[2]) == 2],
+                    "coefficients_rep": [p[2] for p in bias_potential if len(p[2]) == 2],
+                })
+        # ic(self.bias_potential)
 
     def get_initial_structure(self, fn):
         symbols = ['X'] * self.universe.atoms.n_atoms
@@ -271,12 +292,16 @@ class MACECalculator_CG(Calculator):
             node_energy = torch.zeros(num_models, num_atoms, device=self.device)
             forces = torch.zeros(num_models, num_atoms, 3, device=self.device)
             stress = torch.zeros(num_models, 3, 3, device=self.device)
+            bias_node_energies = torch.zeros(num_models, num_atoms, device=self.device)
+            bias_forces = torch.zeros(num_models, num_atoms, 3, device=self.device)
             dict_of_tensors.update(
                 {
                     "energies": energies,
                     "node_energy": node_energy,
                     "forces": forces,
                     "stress": stress,
+                    "bias_node_energies": bias_node_energies,
+                    "bias_forces": bias_forces,
                 }
             )
         if model_type in ["EnergyDipoleMACE", "DipoleMACE"]:
@@ -286,10 +311,12 @@ class MACECalculator_CG(Calculator):
 
     def _atoms_to_batch(self, atoms):
         config = data.config_from_atoms(atoms, charges_key=self.charges_key)
+        # Another z_table hack to deal with ase Atoms. In coarse graining, all atom types will be X and, therefore,
+        # atomic number 0. The node attributes read from Atoms will not be copied to the actual batch used. 
         data_loader = torch_geometric.dataloader.DataLoader(
             dataset=[
                 data.AtomicData.from_config(
-                    config, z_table=self.z_table, cutoff=self.r_max, heads=self.heads
+                    config, z_table=utils.AtomicNumberTable([0]), cutoff=self.r_max, heads=self.heads
                 )
             ],
             batch_size=1,
@@ -297,6 +324,7 @@ class MACECalculator_CG(Calculator):
             drop_last=False,
         )
         batch_atoms = next(iter(data_loader)).to(self.device)
+        # ic(batch_atoms['shifts'].shape)
         batch = self._clone_batch(self.batch_mask)
         batch["cell"] = batch_atoms["cell"]
         batch["positions"] = batch_atoms["positions"]
@@ -340,6 +368,7 @@ class MACECalculator_CG(Calculator):
         ret_tensors = self._create_result_tensors(
             self.model_type, self.num_models, len(atoms)
         )
+        # ic(ret_tensors)
         for i, model in enumerate(self.models):
             batch = self._clone_batch(batch_base)
             out = model(
@@ -347,6 +376,44 @@ class MACECalculator_CG(Calculator):
                 compute_stress=compute_stress,
                 training=self.use_compile,
             )
+            if self.bias_potential is not None:
+                if len(self.bias_potential[i]['pairs_harm']) > 0:
+                    coefficients = torch.tensor(
+                        self.bias_potential[i]["coefficients_harm"], device=self.device
+                    ).unsqueeze(-1)
+                    # ic(coefficients.shape)
+                    pairs = torch.tensor(self.bias_potential[i]["pairs_harm"], device=self.device, dtype=int)
+                    # ic(pairs.shape)
+                    harm_node_energy, harm_forces = calculate_bias_potential(
+                        positions=batch["positions"],
+                        edge_index=batch["edge_index"],
+                        shifts=batch["shifts"],
+                        pairs=pairs,
+                        coefficients=coefficients,
+                        bias_type="harmonic",
+                    )
+
+                if len(self.bias_potential[i]['pairs_rep']) > 0:
+                    coefficients = torch.tensor(
+                        self.bias_potential[i]["coefficients_rep"], device=self.device
+                    ).unsqueeze(-1)
+                    # ic(coefficients.shape)
+                    pairs = torch.tensor(self.bias_potential[i]["pairs_rep"], device=self.device, dtype=int)
+                    # ic(pairs.shape)
+                    rep_node_energy, rep_forces = calculate_bias_potential(
+                        positions=batch["positions"],
+                        edge_index=batch["edge_index"],
+                        shifts=batch["shifts"],
+                        pairs=pairs,
+                        coefficients=coefficients,
+                        bias_type="repulsive",
+                    )
+
+                ret_tensors["bias_node_energies"][i] = harm_node_energy.detach() + rep_node_energy.detach()
+                ret_tensors["bias_forces"][i] = harm_forces.detach() + rep_forces.detach()
+            else:
+                ret_tensors["bias_node_energies"][i] = torch.zeros_like(out["node_energy"].detach())
+                ret_tensors["bias_forces"][i] = torch.zeros_like(out["forces"].detach())
             if self.model_type in ["MACE", "EnergyDipoleMACE"]:
                 ret_tensors["energies"][i] = out["energy"].detach()
                 ret_tensors["node_energy"][i] = (out["node_energy"] - node_e0).detach()
@@ -359,30 +426,49 @@ class MACECalculator_CG(Calculator):
         self.results = {}
         if self.model_type in ["MACE", "EnergyDipoleMACE"]:
             self.results["energy"] = (
-                torch.mean(ret_tensors["energies"], dim=0).cpu().item()
+                torch.mean(
+                    ret_tensors["energies"] + torch.sum(ret_tensors['bias_node_energies'], dim=-1),
+                    dim=0,
+                ).cpu().item()
                 * self.energy_units_to_eV
             )
             self.results["free_energy"] = self.results["energy"]
             self.results["node_energy"] = (
-                torch.mean(ret_tensors["node_energy"], dim=0).cpu().numpy()
+                torch.mean(
+                    ret_tensors["node_energy"] + ret_tensors['bias_node_energies'],
+                    dim=0,
+                ).cpu().numpy()
+            )
+            self.results["bias_forces"] = (
+                torch.mean(-1 * ret_tensors["bias_forces"], dim=0).cpu().numpy()
+                * self.energy_units_to_eV
+                / self.length_units_to_A
             )
             self.results["forces"] = (
-                torch.mean(ret_tensors["forces"], dim=0).cpu().numpy()
+                torch.mean(ret_tensors["forces"] - ret_tensors["bias_forces"], dim=0).cpu().numpy()
                 * self.energy_units_to_eV
                 / self.length_units_to_A
             )
             if self.num_models > 1:
                 self.results["energies"] = (
-                    ret_tensors["energies"].cpu().numpy() * self.energy_units_to_eV
-                )
-                self.results["energy_var"] = (
-                    torch.var(ret_tensors["energies"], dim=0, unbiased=False)
-                    .cpu()
-                    .item()
+                    (ret_tensors["energies"] + torch.sum(ret_tensors['bias_node_energies'], dim=-1)).cpu().numpy()
                     * self.energy_units_to_eV
                 )
+                self.results["energy_var"] = (
+                    torch.var(
+                        ret_tensors["energies"]  - torch.sum(ret_tensors['bias_node_energies'], dim=-1),
+                        dim=0,
+                        unbiased=False,
+                    ).cpu().item()
+                    * self.energy_units_to_eV
+                )
+                self.results["bias_forces_comm"] = (
+                    ret_tensors["bias_forces"].cpu().numpy()
+                    * self.energy_units_to_eV
+                    / self.length_units_to_A
+                )
                 self.results["forces_comm"] = (
-                    ret_tensors["forces"].cpu().numpy()
+                    (ret_tensors["forces"] - ret_tensors["bias_forces"]).cpu().numpy()
                     * self.energy_units_to_eV
                     / self.length_units_to_A
                 )

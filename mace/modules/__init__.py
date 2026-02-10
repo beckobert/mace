@@ -20,6 +20,13 @@ from .blocks import (
     ResidualElementDependentInteractionBlock,
     ScaleShiftBlock,
 )
+from .coarse_graining import (
+    calculate_harmonic_coefficients,
+    write_harmonic_coefficients,
+    read_biasing_potential,
+    calculate_bias_potential,
+    subtract_bias_potential,
+)
 from .loss import (
     DipoleSingleLoss,
     UniversalLoss,
@@ -106,4 +113,9 @@ __all__ = [
     "compute_avg_num_neighbors",
     "compute_statistics",
     "compute_fixed_charge_dipole",
+    "calculate_harmonic_coefficients",
+    "write_harmonic_coefficients",
+    "read_biasing_potential",
+    "calculate_bias_potential",
+    "subtract_bias_potential",
 ]

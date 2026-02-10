@@ -11,16 +11,18 @@ import logging
 import yaml
 from copy import deepcopy
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 import torch.nn.functional
 from e3nn.util import jit
+from icecream import ic
 from torch.utils.data import ConcatDataset
 from torch_ema import ExponentialMovingAverage
 
 import mace
 from mace import data, tools
+from mace.modules import coarse_graining
 from mace.tools import torch_geometric
 from mace.tools.model_script_utils import configure_model
 from mace.tools.multihead_tools import (
@@ -81,10 +83,13 @@ def run(args: argparse.Namespace) -> None:
     args.multiheads_finetuning = False
 
     if args.mda_universes is not None:
-        with open(args.mda_universes, "r") as f:
-            args.mda_universes, hdf5_files = get_mda_universes(yaml.safe_load(f))
-        if hdf5_files["valid"] is None and "valid_fraction" in args:
-            hdf5_files["valid"] = hdf5_files["train"]
+        args.mda_universes = get_mda_universes(args)
+        if args.biasing_potential is not None:
+            bias_potentials = coarse_graining.read_biasing_potential(args.biasing_potential)
+            for u_name, bias_pots in bias_potentials.items():
+                for mda_universe_set in args.mda_universes.values():
+                    if isinstance(mda_universe_set, Dict) and u_name in mda_universe_set.keys():
+                        mda_universe_set[u_name]["bias_potential"] = bias_pots 
     for arg in [args.train_file, args.valid_file, args.test_file]:
         if arg is not None:
             logging.warning(
@@ -133,11 +138,11 @@ def run(args: argparse.Namespace) -> None:
         head_configs.append(head_config)
 
     logging.info(f"No Atomic Numbers/Energies due to coarse graining mode.")
-    if residues is not None:
+    if residues is None:
         residues = []
         for head_config in head_configs:
-            for mda_universe in head_config.mda_universes["train"]:
-                residues.append(mda_universe.residues.resnames)
+            for mda_universe in head_config.mda_universes["train"].values():
+                residues.append(mda_universe["universe"].residues.resnames)
         residues = np.unique(np.concatenate(residues))
     z_table = AtomicNumberTable(list(range(residues.shape[0]))) # Create fake z table
     E0s = ",".join([f"{z:d}: 0.0" for z in z_table.zs])
@@ -148,8 +153,9 @@ def run(args: argparse.Namespace) -> None:
 
     for head_config in head_configs:
         # Data preparation
-        if hdf5_files["train"] is None:
+        if not args.mda_universes["hdf5"]:
             collections = get_dataset_from_mda(
+                args=args,
                 work_dir=args.work_dir,
                 train_universes=head_config.mda_universes["train"],
                 valid_universes=head_config.mda_universes["valid"],
@@ -159,13 +165,11 @@ def run(args: argparse.Namespace) -> None:
                 seed=args.seed,
                 head_name=head_config.head_name,
             )
+
             head_config.collections = collections
-        elif hdf5_files["train"] is not None and head_config.mda_universes["valid"] is None:
-            head_config.mda_universes["valid"] = head_config.mda_universes["train"]
 
     # Atomic number table
     # yapf: disable
-
     dipole_only = False
     args.compute_dipole = False
     atomic_energies = dict_to_array(atomic_energies_dict, heads)
@@ -176,7 +180,7 @@ def run(args: argparse.Namespace) -> None:
     valid_sets = {head: [] for head in heads}
     train_sets = {head: [] for head in heads}
     for head_config in head_configs:
-        if hdf5_files["train"] is None:
+        if not args.mda_universes["hdf5"]:
             train_sets[head_config.head_name] = [
                 data.AtomicData.from_mda_config(
                     config, cutoff=args.r_max, heads=heads,
@@ -200,11 +204,11 @@ def run(args: argparse.Namespace) -> None:
         #     )
         else:  # This case would be for when the file path is to a directory of multiple .h5 files
             train_sets[head_config.head_name] = data.combine_hdf5_datasets(
-                files=[f"train/{fn}" for fn in hdf5_files["train"]], r_max=args.r_max, z_table=z_table,
+                files=[f"train/{fn}" for fn in [f"{name}.h5" for name in args.mda_universes["train"].keys()]], r_max=args.r_max, z_table=z_table,
                 heads=heads, head=head_config.head_name, mda_universes=head_config.mda_universes["train"]
             )
             valid_sets[head_config.head_name] = data.combine_hdf5_datasets(
-                files=[f"val/{fn}" for fn in hdf5_files["valid"]], r_max=args.r_max, z_table=z_table,
+                files=[f"val/{fn}" for fn in [f"{name}.h5" for name in args.mda_universes["valid"].keys()]], r_max=args.r_max, z_table=z_table,
                 heads=heads, head=head_config.head_name, mda_universes=head_config.mda_universes["valid"]
             )
             
@@ -359,11 +363,10 @@ def run(args: argparse.Namespace) -> None:
     ) and head_configs[0].test_dir is not None:
         stop_first_test = True
     for head_config in head_configs:
-        if hdf5_files["test"] is not None:
-            for mda_universe, hdf5_file in zip(head_configs.mda_universes["test"], hdf5_files["test"]):
-                name = hdf5_file.split(".")[0]
+        if args.mda_universes["hdf5"]:
+            for name, mda_universe in zip(head_configs.mda_universes["test"].items()):
                 test_sets[name] = data.HDF5Dataset(
-                    f"test/{hdf5_file}", r_max=args.r_max, z_table=z_table, heads=heads,
+                    f"test/{name}.h5", r_max=args.r_max, z_table=z_table, heads=heads,
                     head=head_config.head_name, mda_universe=mda_universe
                 )
         for test_name, test_set in test_sets.items():
