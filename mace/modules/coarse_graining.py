@@ -189,18 +189,18 @@ def subtract_bias_potential(configs, bias_potential, args):
     # ic(pairs_harm)
     # ic(coefficients_harm)
 
-    edge_index, shifts, _, _ = get_neighborhood(
-        positions=config.positions,
-        cutoff=args.cutoff,
-        pbc=config.pbc,
-        cell=config.cell,
-    )
-    # Transfering data to torch tensors
-    positions = torch.tensor(config.positions)
-    shifts = torch.tensor(shifts)
-    edge_index = torch.tensor(edge_index, device=positions.device, dtype=torch.int)
-
     for config in configs:
+        edge_index, shifts, _, _ = get_neighborhood(
+            positions=config.positions,
+            cutoff=args.r_max,
+            pbc=config.pbc,
+            cell=config.cell,
+        )
+        # Transfering data to torch tensors
+        positions = torch.tensor(config.positions, device=args.device)
+        shifts = torch.tensor(shifts, device=positions.device, dtype=positions.dtype)
+        edge_index = torch.tensor(edge_index, device=positions.device, dtype=torch.int)
+    
         if len(pairs_harm) > 0:
             coefficients = torch.tensor(coefficients_harm, device=positions.device).unsqueeze(-1)
             pairs = torch.tensor(pairs_harm, device=edge_index.device, dtype=int)
@@ -212,7 +212,7 @@ def subtract_bias_potential(configs, bias_potential, args):
                 coefficients=coefficients,
                 bias_type="harmonic",
             )
-            config.forces += np.array(harm_forces)
+            config.forces += np.array(harm_forces.cpu())
         if len(pairs_rep) > 0:
             coefficients = torch.tensor(coefficients_rep, device=positions.device).unsqueeze(-1)
             pairs = torch.tensor(pairs_rep, device=edge_index.device, dtype=int)
@@ -224,7 +224,7 @@ def subtract_bias_potential(configs, bias_potential, args):
                 coefficients=coefficients,
                 bias_type="repulsive",
             )
-            config.forces += np.array(rep_forces)
+            config.forces += np.array(rep_forces.cpu())
         # ic.disable()
         
     return configs
