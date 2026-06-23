@@ -18,7 +18,7 @@ import numpy as np
 
 from mace import data, tools
 from mace.data.utils import save_configurations_as_HDF5
-from mace.modules import compute_statistics
+from mace.modules import coarse_graining, compute_statistics
 from mace.tools import torch_geometric
 from mace.tools.scripts_utils import get_atomic_energies, get_dataset_from_mda, get_mda_universes
 from mace.tools.utils import AtomicNumberTable
@@ -132,7 +132,7 @@ def run(args: argparse.Namespace):
 
     # Data preparation
     with open(args.mda_universes, "r") as f:
-        args.mda_universes, hdf5_files = get_mda_universes(yaml.safe_load(f))
+        args.mda_universes, hdf5_files, bonds = get_mda_universes(yaml.safe_load(f))
     if hdf5_files["valid"] is None and "valid_fraction" in args:
         hdf5_files["valid"] = hdf5_files["train"]
 
@@ -153,6 +153,32 @@ def run(args: argparse.Namespace):
         concatenate=False,
         seed=args.seed,
     )
+    
+    if bonds["train"] is not None:
+        bonds = coarse_graining.sanitize_settings(bonds)
+        coefficients, minima = coarse_graining.calculate_harmonic_coefficients(
+            collections.train,
+            bonds["train"],
+            nbins=args.nbins,
+            T=args.temperature,
+        )
+        coarse_graining.write_harmonic_coefficients(coefficients, minima, bonds["train"], "harm_pot.data")
+        logging.info("Parameters of the harmonic_potential were written to `harm_pot.data")
+        rep_str = "repulsive part of the " if args.subtract_harmonic == "repsulsive" else ""
+        logging.info(f"Subtracting {rep_str}harmonic potential from the datasets.")
+        collection_zip = zip(
+            [collections.train, collections.valid, collections.tests],
+            [bonds["train"], bonds["valid"], bonds["test"]],
+        )
+        for collection, bonds_collection in collection_zip:
+            collection = coarse_graining.subtract_harm_from_collections(
+                collection=collection,
+                cutoff=args.r_max,
+                bonds=bonds_collection,
+                coefficients=coefficients,
+                minima=minima,
+                only_repulsive=(args.subtract_harmonic == "repulsive"),
+            )
 
     logging.info("Preparing training set")
     if args.shuffle:
