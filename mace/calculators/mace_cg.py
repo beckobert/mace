@@ -392,6 +392,8 @@ class MACECalculator_CG(Calculator):
                         coefficients=coefficients,
                         bias_type="harmonic",
                     )
+                else:
+                    harm_node_energy, harm_forces = torch.zeros_like(out["node_energy"].detach()), torch.zeros_like(out["forces"].detach())
 
                 if len(self.bias_potential[i]['pairs_rep']) > 0:
                     coefficients = torch.tensor(
@@ -408,6 +410,9 @@ class MACECalculator_CG(Calculator):
                         coefficients=coefficients,
                         bias_type="repulsive",
                     )
+                else:
+                    rep_node_energy, rep_forces = torch.zeros_like(out["node_energy"].detach()), torch.zeros_like(out["forces"].detach())
+
 
                 ret_tensors["bias_node_energies"][i] = harm_node_energy.detach() + rep_node_energy.detach()
                 ret_tensors["bias_forces"][i] = harm_forces.detach() + rep_forces.detach()
@@ -449,6 +454,11 @@ class MACECalculator_CG(Calculator):
                 * self.energy_units_to_eV
                 / self.length_units_to_A
             )
+            # self.results["forces"] = (
+            #     torch.mean(-1 * ret_tensors["bias_forces"], dim=0).cpu().numpy()
+            #     * self.energy_units_to_eV
+            #     / self.length_units_to_A
+            # )
             if self.num_models > 1:
                 self.results["energies"] = (
                     (ret_tensors["energies"] + torch.sum(ret_tensors['bias_node_energies'], dim=-1)).cpu().numpy()
@@ -472,6 +482,11 @@ class MACECalculator_CG(Calculator):
                     * self.energy_units_to_eV
                     / self.length_units_to_A
                 )
+                # self.results["forces_comm"] = (
+                #     (-1 * ret_tensors["bias_forces"]).cpu().numpy()
+                #     * self.energy_units_to_eV
+                #     / self.length_units_to_A
+                # )
             if out["stress"] is not None:
                 self.results["stress"] = full_3x3_to_voigt_6_stress(
                     torch.mean(ret_tensors["stress"], dim=0).cpu().numpy()
